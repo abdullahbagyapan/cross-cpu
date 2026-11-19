@@ -1,0 +1,86 @@
+#compdef cross-cpu
+# SPDX-License-Identifier: MIT
+# Zsh completion for cross-cpu
+
+_cross_cpu_workloads() {
+    local -a workloads
+    workloads=(
+        'all:Run all supported workloads'
+        'compute-int64:64-bit unsigned integer compute'
+        'compute-int32:32-bit unsigned integer compute'
+        'compute-int16:16-bit unsigned integer compute'
+        'compute-int8:8-bit unsigned integer compute'
+        'compute-vnni:Hardware integer dot-product / VNNI'
+        'compute-fp64:IEEE-754 FP64 contractive FMA'
+        'compute-fp32:IEEE-754 FP32 contractive FMA'
+        'compute-fp16:Hardware FP16 FMA arithmetic'
+        'compute-bf16:Hardware BFloat16 arithmetic'
+        'compute-matrix-fp32:Hardware FP32 matrix engine (SME)'
+        'compute-matrix-bf16:Hardware BF16 matrix engine (AMX/SME)'
+        'compute-matrix-int8:Hardware INT8 matrix engine (AMX/SME)'
+        'crypto-aes:Hardware AES-128 KAT stress'
+        'crypto-sha256:Hardware SHA-256 KAT stress'
+        'cache-l1:L1 data cache read/write verification'
+        'cache-l2:L2 cache read/write verification'
+        'cache-l3:Shared L3/LLC cache read/write verification'
+        'bandwidth-ram:Main memory bandwidth with non-temporal stores'
+        'memory-pattern:Adversarial DRAM bit-pattern sweep with cache flush'
+        'memory-sweep:SplitMix64 address-hashed DRAM sweep'
+        'coherency-atomic:Multi-core C11 atomic cache-line contention'
+    )
+    _describe -t workloads 'workload' workloads
+}
+
+_cross_cpu() {
+    local -a commands
+    commands=(
+        'list:List canonical workloads, fixed units, and ISA readiness'
+        'info:Display CPU topology, cache hierarchy, NUMA, and ISA probes'
+        'run:Execute CPU stress and SDC validation workloads'
+    )
+
+    local -a isas
+    isas=(auto amx avx512 avx2 sse4 sme sve neon rvv vsx vx scalar)
+
+    local -a core_presets
+    core_presets=(all physical p-cores e-cores)
+
+    _arguments -C \
+        '(-h --help)'{-h,--help}'[Show help message]' \
+        '--version[Show CrossCPU version]' \
+        '1:command:->cmd' \
+        '*::arg:->args'
+
+    case "$state" in
+        cmd)
+            _describe -t commands 'cross-cpu command' commands
+            ;;
+        args)
+            case "$line[1]" in
+                list|info)
+                    _arguments \
+                        '--format[Output format]:format:(text json)' \
+                        '--json[Emit JSON output]' \
+                        '(-v --verbose)'{-v,--verbose}'[Verbose diagnostics on stderr]' \
+                        '(-h --help)'{-h,--help}'[Show command help]'
+                    ;;
+                run)
+                    _arguments \
+                        '--cores[Core preset or CPU list]:cores:(all physical p-cores e-cores)' \
+                        '--numa[NUMA node filter]:numa:(all 0 1 2 3)' \
+                        '--isa[ISA backend]:isa:(auto amx avx512 avx2 sse4 sme sve neon rvv vsx vx scalar)' \
+                        '*--test[Workload name(s) or all]:workload:_cross_cpu_workloads' \
+                        '--duration[Timed duration per workload]:duration:(250ms 500ms 1s 5s 10s 30s 1m 5m 1h)' \
+                        '--warmup[Optional warmup duration]::warmup:(0s 500ms 5s 10s)' \
+                        '--format[Output format]:format:(text json)' \
+                        '--json[Emit JSON output]' \
+                        '(-v --verbose)'{-v,--verbose}'[Verbose diagnostics on stderr]' \
+                        '--no-banner[Suppress ASCII banner]' \
+                        '(-h --help)'{-h,--help}'[Show command help]'
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_cross_cpu "$@"
