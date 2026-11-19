@@ -278,7 +278,11 @@ class NativeLibrary:
                 ctypes.c_size_t(CROSS_CPU_MAX_REASON),
             )
         )
-        isa_name = ISA_ID_TO_NAME.get(int(out_isa.value), "none")
+        isa_name = (
+            ISA_ID_TO_NAME.get(int(out_isa.value), "none")
+            if rc == STATUS_OK
+            else "none"
+        )
         return rc, isa_name, _decode_cstr(reason_buf.raw)
 
     def run_workload(
