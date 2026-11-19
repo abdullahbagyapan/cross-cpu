@@ -1,0 +1,164 @@
+.\" SPDX-License-Identifier: MIT
+.TH CROSS-CPU 1 "November 2026" "cross-cpu 1.0.0" "User Commands"
+.SH NAME
+cross-cpu \- cross-platform CPU stress-testing and Silent Data Corruption (SDC) validation suite
+.SH SYNOPSIS
+.B cross-cpu
+.B list
+[\fB\-\-format\fR \fItext\fR|\fIjson\fR]
+[\fB\-\-json\fR]
+[\fB\-v\fR|\fB\-\-verbose\fR]
+.br
+.B cross-cpu
+.B info
+[\fB\-\-format\fR \fItext\fR|\fIjson\fR]
+[\fB\-\-json\fR]
+[\fB\-v\fR|\fB\-\-verbose\fR]
+.br
+.B cross-cpu
+.B run
+[\fB\-\-cores\fR \fIall\fR|\fIphysical\fR|\fIp-cores\fR|\fIe-cores\fR|\fILIST\fR]
+[\fB\-\-numa\fR \fIall\fR|\fIN\fR]
+[\fB\-\-isa\fR \fIauto\fR|\fIISA_NAME\fR]
+[\fB\-\-test\fR \fITEST\fR|\fIall\fR]
+[\fB\-\-duration\fR \fITIME\fR]
+[\fB\-\-warmup\fR [\fITIME\fR]]
+[\fB\-\-format\fR \fItext\fR|\fIjson\fR]
+[\fB\-\-json\fR]
+[\fB\-v\fR|\fB\-\-verbose\fR]
+[\fB\-\-no\-banner\fR]
+.br
+.B cross-cpu
+.BR \-\-help " | " \-\-version
+.SH DESCRIPTION
+.B cross-cpu
+is a modular, zero-dependency CPU stress-testing and Silent Data Corruption (SDC)
+validation CLI for Linux and macOS across
+.BR x86_64 ,
+.BR arm64 " (" aarch64 ),
+.BR riscv64 ,
+.BR ppc64le / ppc64 ,
+.BR s390x ,
+and generic POSIX CPUs. It combines a Python 3.10+ standard-library orchestrator
+with an architecture-isolated C11 + POSIX
+.B pthreads
+native shared library.
+.SH SUBCOMMANDS
+.TP
+.B list
+List all 21 canonical workloads, categories, fixed SI measurement units
+(\fBGOP/s\fR, \fBGFLOP/s\fR, \fBGB/s\fR), and host ISA readiness.
+.TP
+.B info
+Inspect CPU topology (sockets, physical/logical cores, NUMA nodes, hybrid
+P-core/E-core clusters, L1i/L1d/L2/L3 cache hierarchy) and detected ISA backends.
+.TP
+.B run
+Execute selected CPU stress and SDC verification workloads with 1 Hz filtered telemetry.
+.SH OPTIONS
+.TP
+.BI \-\-cores " SPEC"
+Select target cores:
+.BR all " (default),"
+.BR physical " (one thread per physical core),"
+.BR p-cores ,
+.BR e-cores ,
+or a comma-separated CPU list/range such as
+.BR 0-3,6,8-9 .
+.TP
+.BI \-\-numa " NODE"
+Filter cores by NUMA node:
+.BR all " (default) or an integer node ID (" 0 ", " 1 ", ...)."
+.TP
+.BI \-\-isa " ISA"
+Select ISA backend:
+.BR auto " (default, highest-priority available ISA per workload) or an explicit backend (" amx ", " avx512 ", " avx2 ", " sse4 ", " sme ", " sve ", " neon ", " rvv ", " vsx ", " vx ", " scalar ")."
+.TP
+.BI \-\-test " TEST"
+Workload name(s) (comma-separated or repeated) or
+.BR all " (default)."
+.TP
+.BI \-\-duration " TIME"
+Timed measurement duration per workload with
+.BR ms ", " s ", " m ", or " h
+suffix (e.g.,
+.BR 250ms ", " 1.5s ", " 5m ", " 1h "; default: " 10s "). Must be > 0."
+.TP
+.BI \-\-warmup " [TIME]"
+Optional warmup duration before timing. Omitted defaults to
+.BR 0s ;
+bare
+.B \-\-warmup
+defaults to
+.BR 5s ;
+explicit values may be
+.BR 0ms / 0s
+or any positive duration.
+.TP
+.BI \-\-format " text|json"
+Output format on standard output (default:
+.BR text ).
+.TP
+.B \-\-json
+Shorthand for
+.B \-\-format json
+(conflicts with
+.BR "\-\-format text" ).
+.TP
+.BR \-v ", " \-\-verbose
+Emit architecture probe bits, core affinity, buffer sizing, and ISA dispatch
+diagnostics to standard error.
+.TP
+.B \-\-no\-banner
+Suppress the interactive ASCII banner in text mode.
+.SH WORKLOADS
+.TP
+.B Integer (GOP/s, GOP)
+.BR compute-int64 ", " compute-int32 ", " compute-int16 ", " compute-int8 ", " compute-vnni
+.TP
+.B Floating-Point & ML (GFLOP/s, GFLOP)
+.BR compute-fp64 ", " compute-fp32 ", " compute-fp16 ", " compute-bf16
+.TP
+.B Matrix Engines (GFLOP/s, GOP/s)
+.BR compute-matrix-fp32 ", " compute-matrix-bf16 ", " compute-matrix-int8
+.TP
+.B Hardware Crypto (GB/s, GB)
+.BR crypto-aes ", " crypto-sha256
+.TP
+.B Cache & Memory (GB/s, GB)
+.BR cache-l1 ", " cache-l2 ", " cache-l3 ", " bandwidth-ram ", " memory-pattern ", " memory-sweep
+.TP
+.B Multi-Core Coherency (GOP/s, GOP)
+.B coherency-atomic
+.SH EXIT STATUS
+.TP
+.B 0 (SUCCESS)
+All executed workloads passed verification without hardware faults.
+.TP
+.B 1 (USAGE_ERROR)
+Invalid CLI arguments, unknown flag/subcommand/test/ISA, invalid duration, or conflicting
+.BR "\-\-format text \-\-json" .
+.TP
+.B 2 (INIT_ERROR)
+Native library load error, requested
+.BR \-\-isa / \-\-cores / \-\-numa
+unavailable, buffer allocation failure, or explicit
+.B \-\-test
+unsupported.
+.TP
+.B 3 (COMPUTE_ERROR)
+Silent Data Corruption (SDC) numerical/bitwise verification failure, unexpected
+.BR NaN / Inf ,
+crypto KAT mismatch, DRAM bit error, or atomic coherency mismatch.
+.TP
+.B 4 (HARDWARE_ERROR)
+Linux EDAC uncorrectable ECC memory error (\fBue_count\fR delta > 0) or fatal hardware fault.
+.SH EXAMPLES
+.nf
+cross-cpu list
+cross-cpu info --json
+cross-cpu run --test compute-fp32,memory-pattern --duration 250ms --json
+cross-cpu run --cores p-cores --isa auto --warmup 5s --duration 60s
+.fi
+.SH LICENSE
+MIT License.
