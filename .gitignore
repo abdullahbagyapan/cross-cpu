@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+__pycache__/
+*.py[cod]
+*$py.class
+*.o
+*.so
+*.dylib
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.pytest_cache/
+.DS_Store

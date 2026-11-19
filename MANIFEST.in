@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: MIT
+include LICENSE
+include Makefile
+include pyproject.toml
+include setup.py
+include MANIFEST.in
+include cross-cpu
+include README.md
+include CHANGELOG.md
+
+recursive-include native *.c *.h
+recursive-include src *.py
+recursive-include completions *
+recursive-include docs *
+recursive-include tests *.py
+
+global-exclude __pycache__ *.py[cod] *.o *.so *.dylib .DS_Store

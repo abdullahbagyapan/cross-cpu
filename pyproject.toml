@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: MIT
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cross-cpu"
+version = "1.0.0"
+description = "Cross-platform CPU stress-testing and Silent Data Corruption (SDC) validation suite"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "CrossCPU Contributors" },
+]
+keywords = ["cpu", "stress-test", "sdc", "validation", "simd", "x86_64", "arm64", "riscv64"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: C",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: System :: Benchmark",
+  "Topic :: System :: Hardware",
+]
+dependencies = []
+
+[project.scripts]
+cross-cpu = "cross_cpu.cli:main"
+
+[tool.setuptools]
+packages = ["cross_cpu", "cross_cpu.telemetry"]
+package-dir = {"cross_cpu" = "src"}
+include-package-data = false

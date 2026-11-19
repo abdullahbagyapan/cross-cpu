@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: MIT
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x86_64
+            python: "3.12"
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+            python: "3.12"
+          - os: macos-latest
+            name: macos-arm64
+            python: "3.12"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Verify architecture isolation in native/core/
+        run: |
+          if grep -rnE "(__x86_64__|__aarch64__|__arm64__|__riscv|__powerpc__|__ppc64__|__s390x__)" native/core/; then
+            echo "Found forbidden architecture #ifdef in native/core/" >&2
+            exit 1
+          fi
+
+      - name: Build native C11 shared library via Makefile
+        run: make build
+
+      - name: Run Python bytecode compile and offline unit tests
+        run: |
+          python3 -m compileall -q src tests
+          python3 -m unittest discover -s tests -v
+
+      - name: Validate Bash completion syntax and Makefile FHS install
+        run: |
+          bash -n completions/cross-cpu.bash
+          make install DESTDIR=/tmp/cross-cpu-stage PREFIX=/usr
+          test -x /tmp/cross-cpu-stage/usr/bin/cross-cpu
+          test -f /tmp/cross-cpu-stage/usr/share/man/man1/cross-cpu.1
+          test -f /tmp/cross-cpu-stage/usr/share/bash-completion/completions/cross-cpu
+          test -f /tmp/cross-cpu-stage/usr/share/zsh/site-functions/_cross-cpu
+          test -f /tmp/cross-cpu-stage/usr/share/fish/vendor_completions.d/cross-cpu.fish
+
+      - name: Verify offline wheel install in clean venv from /tmp
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m venv /tmp/cross-cpu-venv
+          /tmp/cross-cpu-venv/bin/pip install --no-build-isolation --no-deps .
+          cd /tmp
+          /tmp/cross-cpu-venv/bin/cross-cpu --help
+          /tmp/cross-cpu-venv/bin/cross-cpu --version
+          /tmp/cross-cpu-venv/bin/cross-cpu list --json | python3 -m json.tool > /dev/null
+          /tmp/cross-cpu-venv/bin/cross-cpu info --json | python3 -m json.tool > /dev/null
+          /tmp/cross-cpu-venv/bin/cross-cpu run --test compute-fp32,memory-pattern --duration 250ms --json | python3 -m json.tool > /dev/null
+          /tmp/cross-cpu-venv/bin/python -c '
+          import pathlib, sysconfig
+          sp = pathlib.Path(sysconfig.get_paths()["purelib"])
+          plat = pathlib.Path(sysconfig.get_paths()["platlib"])
+          assert (plat / "cross_cpu").is_dir() or (sp / "cross_cpu").is_dir()
+          assert not (plat / "src").exists() and not (sp / "src").exists()
+          '
+
+      - name: Verify sdist completeness across all native/arch/* directories
+        run: |
+          python3 setup.py sdist --dist-dir /tmp/cross-cpu-dist
+          python3 -c '
+          import tarfile, glob
+          tar_path = glob.glob("/tmp/cross-cpu-dist/cross_cpu-*.tar.gz")[0]
+          with tarfile.open(tar_path, "r:gz") as tf:
+              names = tf.getnames()
+          for required in [
+              "native/core/dispatch.c",
+              "native/arch/common/isa_scalar.c",
+              "native/arch/x86_64/probe_x86.c",
+              "native/arch/arm64/probe_arm64.c",
+              "native/arch/other/riscv64/probe_riscv64.c",
+              "native/arch/other/ppc64/probe_ppc64.c",
+              "native/arch/other/s390x/probe_s390x.c",
+              "native/arch/other/generic/probe_generic.c",
+              "completions/cross-cpu.bash",
+              "completions/_cross-cpu",
+              "completions/cross-cpu.fish",
+              "docs/cross-cpu.1",
+              "Makefile",
+              "LICENSE",
+              "CHANGELOG.md",
+          ]:
+              assert any(n.endswith("/" + required) for n in names), f"Missing {required} in sdist"
+          '
