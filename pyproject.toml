@@ -15,7 +15,7 @@ authors = [
 ]
 keywords = ["cpu", "stress-test", "sdc", "validation", "simd", "x86_64", "arm64", "riscv64"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Intended Audience :: System Administrators",
