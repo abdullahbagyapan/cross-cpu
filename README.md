@@ -45,4 +45,4 @@ make test
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License. Copyright (c) 2026 CrossCPU Contributors. See [LICENSE](LICENSE).
