@@ -62,7 +62,8 @@ jobs:
       - name: Verify offline wheel install in clean venv from /tmp
         run: |
           python3 -m pip install --upgrade pip setuptools wheel
-          python3 -m venv /tmp/cross-cpu-venv
+          python3 -m venv --system-site-packages /tmp/cross-cpu-venv
+          /tmp/cross-cpu-venv/bin/pip install --upgrade pip setuptools wheel
           /tmp/cross-cpu-venv/bin/pip install --no-build-isolation --no-deps .
           cd /tmp
           /tmp/cross-cpu-venv/bin/cross-cpu --help

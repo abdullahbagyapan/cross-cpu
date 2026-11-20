@@ -7,7 +7,7 @@ import signal
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from typing import Callable, Optional, Sequence
 
 from .exit_codes import ExitCode, aggregate_exit_codes
 from .models import CPUTopology, NativeCapabilities, TelemetrySample, WorkloadResult, WorkloadSpec
@@ -36,7 +36,7 @@ class RunReport:
     exit_code: ExitCode = ExitCode.SUCCESS
 
 
-ProgressCallback = Callable[[int, int, str, float, float, TelemetrySample | None], None]
+ProgressCallback = Callable[[int, int, str, float, float, Optional[TelemetrySample]], None]
 ResultCallback = Callable[[int, int, WorkloadResult], None]
 DiagCallback = Callable[[str], None]
 

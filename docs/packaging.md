@@ -28,6 +28,7 @@ Both `setup.py` (`CrossCPUBuildExt`) and `Makefile` detect the target architectu
 ```bash
 # Offline wheel install in an isolated virtual environment
 python3 -m venv /tmp/cross-cpu-venv
+/tmp/cross-cpu-venv/bin/pip install setuptools wheel
 /tmp/cross-cpu-venv/bin/pip install --no-build-isolation --no-deps .
 
 # Build complete source distribution (includes all native/arch/* directories)
