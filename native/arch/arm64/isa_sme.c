@@ -18,6 +18,10 @@ static uint64_t sme_exec_fp32_tile(const float *a_vec,
                                    uint32_t repeats,
                                    uint32_t *out_svlw) __arm_streaming {
     const uint64_t svlw = svcntw();
+    if (svlw == 0ULL || svlw > SME_MAX_SVLW) {
+        *out_svlw = (uint32_t)svlw;
+        return 0ULL;
+    }
     const svbool_t pg = svptrue_b32();
     const svfloat32_t va = svld1_f32(pg, a_vec);
     const svfloat32_t vb = svld1_f32(pg, b_vec);
@@ -42,6 +46,10 @@ static uint64_t sme_exec_bf16_tile(const uint16_t *a_vec,
                                    uint32_t repeats,
                                    uint32_t *out_svlw) __arm_streaming {
     const uint64_t svlw = svcntw();
+    if (svlw == 0ULL || svlw > SME_MAX_SVLW) {
+        *out_svlw = (uint32_t)svlw;
+        return 0ULL;
+    }
     const svbool_t pg16 = svptrue_b16();
     const svbool_t pg32 = svptrue_b32();
     const svbfloat16_t va = svreinterpret_bf16_u16(svld1_u16(pg16, a_vec));
@@ -67,6 +75,10 @@ static uint64_t sme_exec_int8_tile(const int8_t *a_vec,
                                    uint32_t repeats,
                                    uint32_t *out_svlw) __arm_streaming {
     const uint64_t svlw = svcntw();
+    if (svlw == 0ULL || svlw > SME_MAX_SVLW) {
+        *out_svlw = (uint32_t)svlw;
+        return 0ULL;
+    }
     const svbool_t pg8  = svptrue_b8();
     const svbool_t pg32 = svptrue_b32();
     const svint8_t va = svld1_s8(pg8, a_vec);

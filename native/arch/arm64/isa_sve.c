@@ -40,6 +40,9 @@ static int32_t sve_compute_int64(cross_cpu_worker_ctx_t *ctx) {
     const uint64_t mul_c = 6364136223846793005ULL;
     const uint64_t inc_c = 1442695040888963407ULL;
     const uint64_t lanes = svcntd();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 8u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b64();
     const svuint64_t vmul = svdup_u64(mul_c);
     const svuint64_t vinc = svdup_u64(inc_c);
@@ -88,6 +91,9 @@ static int32_t sve_compute_int32(cross_cpu_worker_ctx_t *ctx) {
     const uint32_t mul_c = 1664525u;
     const uint32_t inc_c = 1013904223u;
     const uint64_t lanes = svcntw();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 4u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b32();
     const svuint32_t vmul = svdup_u32(mul_c);
     const svuint32_t vinc = svdup_u32(inc_c);
@@ -138,6 +144,9 @@ static int32_t sve_compute_int16(cross_cpu_worker_ctx_t *ctx) {
     const uint16_t mul_c = 25173u;
     const uint16_t inc_c = 13849u;
     const uint64_t lanes = svcnth();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 2u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b16();
     const svuint16_t vmul = svdup_u16(mul_c);
     const svuint16_t vinc = svdup_u16(inc_c);
@@ -188,6 +197,9 @@ static int32_t sve_compute_int8(cross_cpu_worker_ctx_t *ctx) {
     const uint8_t mul_c = 141u;
     const uint8_t inc_c = 53u;
     const uint64_t lanes = svcntb();
+    if (lanes == 0ULL || lanes > SVE_MAX_BYTES) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b8();
     const svuint8_t vmul = svdup_u8(mul_c);
     const svuint8_t vinc = svdup_u8(inc_c);
@@ -236,6 +248,9 @@ static int32_t sve_compute_int8(cross_cpu_worker_ctx_t *ctx) {
 static int32_t sve_compute_vnni(cross_cpu_worker_ctx_t *ctx) {
     const uint32_t inner = 256u;
     const uint64_t lanes = svcntw();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 4u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg32 = svptrue_b32();
     const svbool_t pg8  = svptrue_b8();
 
@@ -293,6 +308,9 @@ static int32_t sve_compute_vnni(cross_cpu_worker_ctx_t *ctx) {
 static int32_t sve_compute_fp64(cross_cpu_worker_ctx_t *ctx) {
     const uint32_t inner = 128u;
     const uint64_t lanes = svcntd();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 8u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b64();
     const svfloat64_t va = svdup_f64(0.75);
 
@@ -344,6 +362,9 @@ static int32_t sve_compute_fp64(cross_cpu_worker_ctx_t *ctx) {
 static int32_t sve_compute_fp32(cross_cpu_worker_ctx_t *ctx) {
     const uint32_t inner = 128u;
     const uint64_t lanes = svcntw();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 4u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b32();
     const svfloat32_t va = svdup_f32(0.75f);
 
@@ -395,6 +416,9 @@ static int32_t sve_compute_fp32(cross_cpu_worker_ctx_t *ctx) {
 static int32_t sve_compute_fp16(cross_cpu_worker_ctx_t *ctx) {
     const uint32_t inner = 64u;
     const uint64_t lanes = svcnth();
+    if (lanes == 0ULL || lanes > (SVE_MAX_BYTES / 2u)) {
+        return CROSS_CPU_STATUS_INIT_ERROR;
+    }
     const svbool_t pg = svptrue_b16();
     const svfloat16_t va = svdup_f16((float16_t)0.75f);
 

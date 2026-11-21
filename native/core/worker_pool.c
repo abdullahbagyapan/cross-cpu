@@ -285,9 +285,8 @@ static void *worker_thread_main(void *arg) {
 
     st->status = CROSS_CPU_STATUS_OK;
 
-    uint64_t batch_num = 0;
     for (;;) {
-        if (batch_num > 0 && atomic_load_explicit(&g_stop_flag, memory_order_acquire) != 0) {
+        if (atomic_load_explicit(&g_stop_flag, memory_order_acquire) != 0) {
             break;
         }
 
@@ -309,7 +308,6 @@ static void *worker_thread_main(void *arg) {
         st->total_coherency_adds += ctx.coherency_adds;
         st->total_errors += ctx.errors;
         st->iterations++;
-        batch_num++;
 
         if (ctx.ops_done > 0ULL) {
             atomic_fetch_add_explicit(&g_progress_ops, ctx.ops_done, memory_order_relaxed);

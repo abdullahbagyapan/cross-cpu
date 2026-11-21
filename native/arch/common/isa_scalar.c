@@ -387,6 +387,10 @@ static int32_t scalar_cache_or_bandwidth(cross_cpu_worker_ctx_t *ctx) {
             buf[i] = salt ^ ((uint64_t)i * 0x9e3779b97f4a7c15ULL);
         }
 
+        if (ctx->workload_id == CROSS_CPU_WL_BANDWIDTH_RAM) {
+            cross_cpu_arch_flush_cache_range(buf, ctx->thread_buf_bytes);
+        }
+
         if (ctx->inject_fault && ctx->thread_idx == 0u && pass == 0ULL && words > 0u) {
             buf[words / 2u] ^= 0x0000000100000000ULL;
         }
