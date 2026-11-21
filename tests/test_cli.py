@@ -8,7 +8,7 @@ import json
 import unittest
 
 from src.banner import BANNER_LINES, render_banner, should_show_banner, supports_color
-from src.cli import CLIUsageError, main, parse_duration
+from src.cli import CLIUsageError, build_parser, main, parse_duration
 from src.exit_codes import ExitCode
 from src.runner import format_duration_progress
 
@@ -51,6 +51,18 @@ class TestDurationAndProgress(unittest.TestCase):
         self.assertEqual(format_duration_progress(0.25, 0.5), "250ms/500ms")
         self.assertNotEqual(format_duration_progress(0.25, 0.5), "0s/0s")
         self.assertEqual(format_duration_progress(18.2, 60.0), "18s/60s")
+
+    def test_warmup_defaults_and_ms_syntax(self) -> None:
+        parser = build_parser()
+        args_omitted = parser.parse_args(["run", "--duration", "200ms"])
+        self.assertIsNone(args_omitted.warmup)
+
+        args_bare = parser.parse_args(["run", "--warmup", "--duration", "200ms"])
+        self.assertEqual(args_bare.warmup, "5s")
+        self.assertAlmostEqual(parse_duration(args_bare.warmup, allow_zero=True), 5.0)
+
+        args_zero = parser.parse_args(["run", "--warmup", "0ms", "--duration", "200ms"])
+        self.assertAlmostEqual(parse_duration(args_zero.warmup, allow_zero=True), 0.0)
 
 
 class TestBannerGuards(unittest.TestCase):
@@ -125,6 +137,10 @@ class TestCLIBehavior(unittest.TestCase):
 
         # Invalid duration <= 0 -> exit 1
         rc, out, err = self._run_cli(["run", "--duration", "0s"])
+        self.assertEqual(rc, int(ExitCode.USAGE_ERROR))
+        rc, out, err = self._run_cli(["run", "--duration", "0ms"])
+        self.assertEqual(rc, int(ExitCode.USAGE_ERROR))
+        rc, out, err = self._run_cli(["run", "--duration=-5ms"])
         self.assertEqual(rc, int(ExitCode.USAGE_ERROR))
 
         # Conflicting --format text --json -> exit 1

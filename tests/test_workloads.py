@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+import time
 import unittest
 
 from src.cli import main
 from src.exit_codes import ExitCode
 from src.models import CacheInfo, CoreInfo, CPUTopology
-from src.native_bridge import STATUS_OK, NativeLibrary
+from src.native_bridge import STATUS_OK, STATUS_STOPPED, NativeLibrary
 from src.topology import discover_topology
 from src.workloads import (
     ALL_WORKLOAD_NAMES,
@@ -108,6 +110,46 @@ class TestWorkloadRegistryAndSizing(unittest.TestCase):
         self.assertEqual(buf, 0)
         self.assertIsNotNone(reason)
 
+        # Single-core runs must still exceed LLC for bandwidth-ram, memory-pattern, and memory-sweep
+        for wl_name in ("bandwidth-ram", "memory-pattern", "memory-sweep"):
+            one_core_buf, err = compute_workload_buffer_bytes(
+                WORKLOAD_BY_NAME[wl_name], topo_with_l3, 1
+            )
+            self.assertIsNone(err)
+            self.assertGreater(
+                one_core_buf,
+                topo_with_l3.caches.l3_bytes,
+                msg=f"{wl_name} 1-core buffer must exceed L3 LLC",
+            )
+
+        # Low-RAM container safety: aggregate allocation across 16 threads must stay <= 25% total / 50% avail
+        topo_low_ram = CPUTopology(
+            os_name="Linux",
+            machine="x86_64",
+            model_name="MockLowRAM",
+            sockets=1,
+            physical_cores=16,
+            logical_cores=16,
+            numa_nodes=(0,),
+            is_hybrid=False,
+            p_core_ids=(),
+            e_core_ids=(),
+            memory_bytes=64 * 1024 * 1024,
+            caches=CacheInfo(l1d_bytes=32 * 1024, l2_bytes=256 * 1024, l3_bytes=16 * 1024 * 1024, discovered=True),
+            cores=tuple(CoreInfo(i, i) for i in range(16)),
+            pinning_supported=True,
+            pinning_note="mock",
+        )
+        for wl_name in ("bandwidth-ram", "memory-pattern", "memory-sweep"):
+            low_buf, err = compute_workload_buffer_bytes(
+                WORKLOAD_BY_NAME[wl_name],
+                topo_low_ram,
+                16,
+                available_memory_bytes=32 * 1024 * 1024,
+            )
+            self.assertIsNone(err)
+            self.assertLessEqual(low_buf * 16, 16 * 1024 * 1024)
+
 
 class TestNativeExecutionAndFaultInjection(unittest.TestCase):
     @classmethod
@@ -156,11 +198,24 @@ class TestNativeExecutionAndFaultInjection(unittest.TestCase):
             self.assertGreater(res["raw_ops"], 0)
 
     def test_fault_injection_triggers_compute_error_exit_code_3(self) -> None:
-        for wl_name in ("compute-fp32", "memory-pattern", "coherency-atomic"):
+        fault_targets = [
+            "compute-int64",
+            "compute-fp32",
+            "bandwidth-ram",
+            "memory-pattern",
+            "memory-sweep",
+            "coherency-atomic",
+        ]
+        for crypto_wl in ("crypto-aes", "crypto-sha256"):
+            st, _, _ = self.lib.resolve_isa(WORKLOAD_BY_NAME[crypto_wl].workload_id, "auto")
+            if st == STATUS_OK:
+                fault_targets.append(crypto_wl)
+
+        for wl_name in fault_targets:
             out = io.StringIO()
             err = io.StringIO()
             rc = main(
-                ["run", "--test", wl_name, "--duration", "100ms", "--json"],
+                ["run", "--cores", "0", "--test", wl_name, "--duration", "60ms", "--json"],
                 stdout=out,
                 stderr=err,
                 native_library=self.lib,
@@ -177,6 +232,81 @@ class TestNativeExecutionAndFaultInjection(unittest.TestCase):
             self.assertEqual(payload["results"][0]["status"], "failed")
             self.assertGreater(payload["results"][0]["error_count"], 0)
             self.assertEqual(payload["summary"]["exit_code"], int(ExitCode.COMPUTE_ERROR))
+
+        # Also verify scalar bandwidth-ram (with cache flush) catches bit errors
+        out_s = io.StringIO()
+        err_s = io.StringIO()
+        rc_s = main(
+            [
+                "run",
+                "--cores",
+                "0",
+                "--isa",
+                "scalar",
+                "--test",
+                "bandwidth-ram",
+                "--duration",
+                "60ms",
+                "--json",
+            ],
+            stdout=out_s,
+            stderr=err_s,
+            native_library=self.lib,
+            topology_override=self.topo,
+            inject_fault_workloads={"bandwidth-ram"},
+        )
+        self.assertEqual(rc_s, int(ExitCode.COMPUTE_ERROR))
+        self.assertEqual(err_s.getvalue(), "")
+
+    def test_test_all_skips_unsupported_without_init_error(self) -> None:
+        out = io.StringIO()
+        err = io.StringIO()
+        rc = main(
+            ["run", "--cores", "0", "--isa", "scalar", "--test", "all", "--duration", "20ms", "--json"],
+            stdout=out,
+            stderr=err,
+            native_library=self.lib,
+            topology_override=self.topo,
+        )
+        self.assertEqual(rc, int(ExitCode.SUCCESS), msg=f"out={out.getvalue()} err={err.getvalue()}")
+        self.assertEqual(err.getvalue(), "")
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["summary"]["exit_code"], int(ExitCode.SUCCESS))
+        self.assertGreaterEqual(payload["summary"]["unsupported"], 8)
+        self.assertGreaterEqual(payload["summary"]["passed"], 12)
+        for res in payload["results"]:
+            if res["status"] == "unsupported":
+                self.assertTrue(len(res.get("reason", "")) > 0)
+
+    def test_atomic_stop_flag_cancels_workload_cleanly(self) -> None:
+        self.lib.reset_stop()
+        box: list[dict[str, int | float | str | None]] = []
+
+        def _run() -> None:
+            box.append(
+                self.lib.run_workload(
+                    workload_id=WORKLOAD_BY_NAME["compute-fp32"].workload_id,
+                    requested_isa="auto",
+                    core_ids=[0],
+                    duration_ns=5_000_000_000,
+                    batch_ns=50_000_000,
+                )
+            )
+
+        t0 = time.monotonic()
+        th = threading.Thread(target=_run)
+        th.start()
+        time.sleep(0.05)
+        self.lib.request_stop()
+        th.join(timeout=2.0)
+        elapsed = time.monotonic() - t0
+        self.lib.reset_stop()
+
+        self.assertFalse(th.is_alive(), msg="Worker thread did not join promptly on stop")
+        self.assertLess(elapsed, 1.5)
+        self.assertEqual(len(box), 1)
+        self.assertEqual(box[0]["status"], STATUS_STOPPED)
+        self.assertEqual(box[0]["error_count"], 0)
 
     def test_explicit_unsupported_workload_exits_init_error_2(self) -> None:
         # Force scalar on compute-fp16 -> guaranteed unsupported on every architecture

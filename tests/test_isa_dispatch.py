@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import re
 import unittest
 from pathlib import Path
@@ -13,6 +14,10 @@ from src.native_bridge import (
     STATUS_OK,
     STATUS_UNSUPPORTED,
     NativeLibrary,
+    _CCaps,
+    _CISAInfo,
+    _CRunConfig,
+    _CRunResult,
 )
 from src.workloads import WORKLOAD_BY_NAME
 
@@ -57,6 +62,34 @@ class TestArchitectureIsolation(unittest.TestCase):
             "other/generic/probe_generic.c",
         ):
             self.assertTrue((arch_dir / rel).is_file(), msg=f"Missing {rel}")
+
+    def test_abi_struct_layout_sizes_and_offsets(self) -> None:
+        self.assertEqual(ctypes.sizeof(_CISAInfo), 312)
+        self.assertEqual(ctypes.sizeof(_CCaps), 5336)
+        self.assertEqual(ctypes.sizeof(_CRunConfig), 4152)
+        self.assertEqual(ctypes.sizeof(_CRunResult), 360)
+        self.assertEqual(_CCaps.raw_probe.offset, 16)
+        self.assertEqual(_CCaps.isas.offset, 344)
+        self.assertEqual(_CRunConfig.duration_ns.offset, 16)
+        self.assertEqual(_CRunConfig.core_ids.offset, 56)
+        self.assertEqual(_CRunResult.total_ops.offset, 16)
+        self.assertEqual(_CRunResult.expected_sample.offset, 48)
+        self.assertEqual(_CRunResult.isa_name.offset, 72)
+        self.assertEqual(_CRunResult.reason.offset, 104)
+
+    def test_build_scripts_never_use_march_native_or_global_z14(self) -> None:
+        setup_txt = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
+        makefile_txt = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        # Never pass -march=native to any compiler command
+        self.assertNotIn('"-march=native"', setup_txt)
+        self.assertNotIn("-march=native", makefile_txt)
+        # s390x TU must compile at -march=z13 and isolate z14 VXE via target attribute
+        self.assertIn('"-march=z13"', setup_txt)
+        self.assertNotIn('"-march=z14"', setup_txt)
+        self.assertIn("-march=z13", makefile_txt)
+        self.assertNotIn("-march=z14", makefile_txt)
+        self.assertIn('target("arch=z14")', setup_txt)
+        self.assertIn('target("arch=z14")', makefile_txt)
 
 
 class TestISADispatchAndZeroFakeEmulation(unittest.TestCase):

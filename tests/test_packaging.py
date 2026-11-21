@@ -140,6 +140,12 @@ class TestPackagingAndHygiene(unittest.TestCase):
         self.assertIn('dependencies = []', pyproject)
         self.assertIn('"cross_cpu" = "src"', pyproject)
         self.assertIn('cross-cpu = "cross_cpu.cli:main"', pyproject)
+        self.assertNotIn("telemetry", pyproject.lower())
+        self.assertFalse((REPO_ROOT / "src" / "telemetry").exists())
+        for path in (REPO_ROOT / "src").rglob("*.py"):
+            txt = path.read_text(encoding="utf-8").lower()
+            self.assertNotIn("telemetry", txt, msg=f"Leftover telemetry reference in {path}")
+            self.assertNotIn("ndjson", txt, msg=f"Leftover ndjson reference in {path}")
 
     def test_sdist_includes_all_arch_directories_offline(self) -> None:
         if importlib.util.find_spec("setuptools") is None:
@@ -219,12 +225,14 @@ class TestPackagingAndHygiene(unittest.TestCase):
                     any(re.search(rf"/{re.escape(req)}$", n) for n in names),
                     msg=f"Missing {req} in sdist tarball",
                 )
-            # Confirm no compiled binary artifacts leaked into sdist
+            # Confirm no compiled binary artifacts, telemetry, or demo assets leaked into sdist
             for n in names:
                 self.assertFalse(
                     n.endswith((".so", ".dylib", ".o", ".pyc")),
                     msg=f"Compiled artifact leaked into sdist: {n}",
                 )
+                self.assertNotIn("/telemetry", n, msg=f"Telemetry artifact leaked into sdist: {n}")
+                self.assertNotIn("/assets/", n, msg=f"Demo asset leaked into sdist: {n}")
 
 
 if __name__ == "__main__":
