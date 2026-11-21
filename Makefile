@@ -124,8 +124,8 @@ else ifeq ($(ARCH_FAMILY),s390x)
     native/arch/other/s390x/probe_s390x.c \
     native/arch/other/s390x/isa_vx.c
   HAVE_VX   := $(shell printf '$(HASH)include <vecintrin.h>\nint f(void){return 0;}\n' | $(CC) -std=c11 -O2 -fPIC -mzvector -march=z13 -x c -c - -o /dev/null 2>/dev/null && echo 1 || echo 0)
-  HAVE_VXE  := $(shell printf '$(HASH)include <vecintrin.h>\n__vector float f(__vector float a){return vec_madd(a,a,a);}\n' | $(CC) -std=c11 -O2 -fPIC -mzvector -march=z14 -x c -c - -o /dev/null 2>/dev/null && echo 1 || echo 0)
-  VX_FLAGS  := $(if $(filter 1,$(HAVE_VXE)),-mzvector -march=z14 -DCROSS_CPU_HAVE_VX -DCROSS_CPU_HAVE_VXE,$(if $(filter 1,$(HAVE_VX)),-mzvector -march=z13 -DCROSS_CPU_HAVE_VX))
+  HAVE_VXE  := $(shell printf '$(HASH)include <vecintrin.h>\n__attribute__((target("arch=z14"))) __vector float f(__vector float a){return vec_madd(a,a,a);}\n' | $(CC) -std=c11 -O2 -fPIC -mzvector -march=z13 -x c -c - -o /dev/null 2>/dev/null && echo 1 || echo 0)
+  VX_FLAGS  := $(if $(filter 1,$(HAVE_VX)),-mzvector -march=z13 -DCROSS_CPU_HAVE_VX $(if $(filter 1,$(HAVE_VXE)),-DCROSS_CPU_HAVE_VXE))
 
 else
   ARCH_SRCS := native/arch/other/generic/probe_generic.c

@@ -284,6 +284,9 @@ static int32_t vx_compute_fp64(cross_cpu_worker_ctx_t *ctx) {
 }
 
 #if (defined(__ARCH__) && (__ARCH__ >= 12)) || defined(CROSS_CPU_HAVE_VXE)
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((target("arch=z14")))
+#endif
 static int32_t vx_compute_fp32(cross_cpu_worker_ctx_t *ctx) {
     const uint32_t inner = 128u;
     const __vector float va = vec_splats(0.75f);
@@ -346,6 +349,10 @@ static int32_t vx_memory_rw(cross_cpu_worker_ctx_t *ctx) {
         for (size_t i = 0; i < vecs; i++) {
             vec_xst(cur, 0, buf + i * 2u);
             cur = cur + step;
+        }
+
+        if (ctx->workload_id == CROSS_CPU_WL_BANDWIDTH_RAM) {
+            cross_cpu_arch_flush_cache_range(buf, ctx->thread_buf_bytes);
         }
 
         if (ctx->inject_fault && ctx->thread_idx == 0u && pass == 0ULL) {

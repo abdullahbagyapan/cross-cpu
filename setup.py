@@ -250,18 +250,17 @@ def build_arch_compile_plan(
         vx_flags: list[str] = []
         if probe_compiler_snippet(
             cc_cmd,
-            ["-mzvector", "-march=z14"],
-            "#include <vecintrin.h>\n__vector float f(__vector float a){return vec_madd(a,a,a);}\n",
-        ):
-            vx_flags.extend(
-                ["-mzvector", "-march=z14", "-DCROSS_CPU_HAVE_VX", "-DCROSS_CPU_HAVE_VXE"]
-            )
-        elif probe_compiler_snippet(
-            cc_cmd,
             ["-mzvector", "-march=z13"],
             "#include <vecintrin.h>\nint f(void){return 0;}\n",
         ):
             vx_flags.extend(["-mzvector", "-march=z13", "-DCROSS_CPU_HAVE_VX"])
+            if probe_compiler_snippet(
+                cc_cmd,
+                ["-mzvector", "-march=z13"],
+                '#include <vecintrin.h>\n__attribute__((target("arch=z14"))) '
+                "__vector float f(__vector float a){return vec_madd(a,a,a);}\n",
+            ):
+                vx_flags.append("-DCROSS_CPU_HAVE_VXE")
         plan.append(("native/arch/other/s390x/isa_vx.c", vx_flags))
 
     else:

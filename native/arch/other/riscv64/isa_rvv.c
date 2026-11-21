@@ -334,6 +334,10 @@ static int32_t rvv_memory_rw(cross_cpu_worker_ctx_t *ctx) {
             i += vl;
         }
 
+        if (ctx->workload_id == CROSS_CPU_WL_BANDWIDTH_RAM) {
+            cross_cpu_arch_flush_cache_range(buf, ctx->thread_buf_bytes);
+        }
+
         if (ctx->inject_fault && ctx->thread_idx == 0u && pass == 0ULL) {
             buf[0] ^= 1ULL;
         }
