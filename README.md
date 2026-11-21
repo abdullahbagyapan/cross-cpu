@@ -1,8 +1,11 @@
-# CrossCPU (`cross-cpu`)
+# CrossCPU
 
 `CrossCPU` is a production-grade CPU stress-testing and Silent Data Corruption (SDC) validation suite targeting **Linux** and **macOS** across **x86_64**, **ARM64 (`aarch64`)**, and **other POSIX architectures (`riscv64`, `ppc64le`/`ppc64`, `s390x`, and generic CPUs)**.
 
 It combines a **zero-dependency Python 3.10+ standard-library CLI orchestrator** with a **strictly architecture-isolated C11 + POSIX `pthreads` native shared library** loaded via `ctypes`.
+
+![Terminal Demo](./assets/demo.gif)
+
 
 ## Highlights
 
