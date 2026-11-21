@@ -39,5 +39,5 @@ Dedicated sub-modules ensure distro build farms on non-x86/non-ARM architectures
 | --- | --- | --- | --- | --- |
 | `riscv64` | `native/arch/other/riscv64/` | `rvv` | `80` | Linux `getauxval(AT_HWCAP)` V-extension (`1 << ('V' - 'A')`) and `riscv_hwprobe` (`RISCV_HWPROBE_IMA_V` + `Zvk*`); compiled when toolchain supports `-march=rv64gcv` (`<riscv_vector.h>`) |
 | `ppc64le` / `ppc64` | `native/arch/other/ppc64/` | `vsx` | `80` | Linux `getauxval(AT_HWCAP)` `PPC_FEATURE_HAS_VSX` (`0x80`) and `AT_HWCAP2` POWER9/POWER10/MMA bits; compiled with `-mvsx` (`<altivec.h>`) |
-| `s390x` | `native/arch/other/s390x/` | `vx` | `80` | Linux `getauxval(AT_HWCAP)` `HWCAP_S390_VX` (`2048`) and `HWCAP_S390_VXE` (`8192`); big-endian safe; compiled with `-mzvector` (`<vecintrin.h>`) |
+| `s390x` | `native/arch/other/s390x/` | `vx` | `80` | Linux `getauxval(AT_HWCAP)` `HWCAP_S390_VX` (`2048`) and `HWCAP_S390_VXE` (`8192`); big-endian safe; compiled with `-mzvector -march=z13` (`<vecintrin.h>`) with `VXE` FP32 isolated via `__attribute__((target("arch=z14")))` |
 | Any other POSIX CPU | `native/arch/other/generic/` | `scalar` | `20` | `probe_generic.c` registers portable C11 `scalar` (`isa_scalar.c`) and `cache_flush_generic.c` with zero build failures |

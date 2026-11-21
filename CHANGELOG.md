@@ -23,9 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Isolated per-ISA translation units for `neon` (ASIMD + FP16 + BF16 + DotProd + I8MM + FEAT_AES + FEAT_SHA256 + `stnp`), `sve` (Linux SVE/SVE2), and `sme` (ARMv9 SME matrix engine).
 - **Other Architectures (`native/arch/other/`):**
   - `riscv64` (`getauxval`/`riscv_hwprobe` + RVV 1.0 `rvv`), `ppc64`/`ppc64le` (`AT_HWCAP`/`AT_HWCAP2` + AltiVec/VSX `vsx`), `s390x` (big-endian safe `AT_HWCAP` + IBM z/Vector `vx`), and `generic` POSIX fallback.
-- **Python 3.10+ Stdlib CLI & Telemetry (`src/`):**
-  - `cross-cpu list`, `cross-cpu info`, and `cross-cpu run` subcommands with `ms`/`s`/`m`/`h` duration parser, `difflib` typo suggestions, `<80`-column ASCII banner with `NO_COLOR`/`TERM=dumb`/TTY/JSON guards, and severity-ordered exit codes (`0..4`).
+- **Python 3.10+ Stdlib CLI (`src/`):**
+  - `cross-cpu list`, `cross-cpu info`, and `cross-cpu run` subcommands with `ms`/`s`/`m`/`h` duration parser, `difflib` typo suggestions, `<80`-column ASCII banner with `NO_COLOR`/`TERM=dumb`/TTY/JSON guards, single-document `--json` output, and severity-ordered exit codes (`0..4`).
   - Linux `sysfs` and macOS `sysctl` topology discovery (`src/topology.py`).
-  - Drift-compensated 1 Hz filtered telemetry (`src/telemetry/`) using `threading.Event.wait()` with Linux (`procfs`/`hwmon`/`cpufreq`/`RAPL`/`EDAC`) and macOS Mach readers.
 - **Packaging, Completions & Documentation:**
   - Static `bash`, `zsh`, and `fish` completions (`completions/`), offline `Makefile` with FHS `install`/`uninstall`, PEP 621 `pyproject.toml`, per-arch C11 `setup.py` (including macOS `universal2` slice compilation), `docs/` suite, and `cross-cpu(1)` man page.

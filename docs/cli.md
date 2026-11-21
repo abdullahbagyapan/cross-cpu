@@ -63,3 +63,57 @@ When multiple workloads execute in a single invocation, `cross-cpu` aggregates a
 - **`stdout`:** Strictly reserved for primary command output (`text` tables or a single strict `json` document), `--help`, and `--version`.
 - **`stderr`:** Reserved for usage/init/compute/hardware error diagnostics, unsupported workload reasons, and `-v`/`--verbose` output in text mode. When `--json` (or `--format json`) is active, error and verbose diagnostics are suppressed so `stderr` remains completely clean.
 - **`difflib` Hints:** Mistyped subcommands, `--test` names, `--isa` backends, and `--cores` presets suggest the closest valid match.
+
+## Single-Document JSON Output Schema
+
+`cross-cpu list --json`, `cross-cpu info --json`, and `cross-cpu run --json` each emit one strict JSON document on `stdout` parseable directly via `json.loads()`. Example `cross-cpu run --test compute-fp32 --duration 250ms --json` payload:
+
+```json
+{
+  "command": "run",
+  "version": "0.1.0",
+  "host": {
+    "os": "Linux",
+    "machine": "x86_64",
+    "model_name": "Example CPU",
+    "arch": "x86_64",
+    "endianness": "little"
+  },
+  "config": {
+    "cores": "all",
+    "selected_core_ids": [0, 1, 2, 3],
+    "numa": "all",
+    "requested_isa": "auto",
+    "duration_s": 0.25,
+    "warmup_s": 0.0
+  },
+  "results": [
+    {
+      "name": "compute-fp32",
+      "category": "floating-point",
+      "status": "passed",
+      "isa": "avx2",
+      "threads": 4,
+      "duration_s": 0.2512,
+      "rate": 128.45,
+      "rate_unit": "GFLOP/s",
+      "total_work": 32.26664,
+      "total_unit": "GFLOP",
+      "raw_ops": 32266640000,
+      "iterations": 32,
+      "error_count": 0,
+      "exit_code": 0
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "unsupported": 0,
+    "init_error": 0,
+    "stopped": 0,
+    "interrupted": false,
+    "exit_code": 0,
+    "exit_name": "SUCCESS"
+  }
+}
+```

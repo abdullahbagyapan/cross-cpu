@@ -1,7 +1,7 @@
 .\" SPDX-License-Identifier: MIT
-.TH CROSS-CPU 1 "November 2026" "cross-cpu 0.1.0" "User Commands"
+.TH CROSS-CPU 1 "2026-11-21" "cross-cpu 0.1.0" "User Commands"
 .SH NAME
-cross-cpu \- cross-platform CPU stress-testing and Silent Data Corruption (SDC) validation suite
+cross-cpu \- CPU stress-testing and Silent Data Corruption (SDC) suite
 .SH SYNOPSIS
 .B cross-cpu
 .B list
@@ -17,7 +17,8 @@ cross-cpu \- cross-platform CPU stress-testing and Silent Data Corruption (SDC) 
 .br
 .B cross-cpu
 .B run
-[\fB\-\-cores\fR \fIall\fR|\fIphysical\fR|\fIp-cores\fR|\fIe-cores\fR|\fILIST\fR]
+[\fB\-\-cores\fR
+\fIall\fR|\fIphysical\fR|\fIp-cores\fR|\fIe-cores\fR|\fILIST\fR]
 [\fB\-\-numa\fR \fIall\fR|\fIN\fR]
 [\fB\-\-isa\fR \fIauto\fR|\fIISA_NAME\fR]
 [\fB\-\-test\fR \fITEST\fR|\fIall\fR]
@@ -32,8 +33,8 @@ cross-cpu \- cross-platform CPU stress-testing and Silent Data Corruption (SDC) 
 .BR \-\-help " | " \-\-version
 .SH DESCRIPTION
 .B cross-cpu
-is a modular, zero-dependency CPU stress-testing and Silent Data Corruption (SDC)
-validation CLI for Linux and macOS across
+is a modular, zero-dependency CPU stress-testing and Silent Data Corruption
+(SDC) validation CLI for Linux and macOS across
 .BR x86_64 ,
 .BR arm64 " (" aarch64 ),
 .BR riscv64 ,
@@ -51,7 +52,8 @@ List all 21 canonical workloads, categories, fixed SI measurement units
 .TP
 .B info
 Inspect CPU topology (sockets, physical/logical cores, NUMA nodes, hybrid
-P-core/E-core clusters, L1i/L1d/L2/L3 cache hierarchy) and detected ISA backends.
+P-core/E-core clusters, L1i/L1d/L2/L3 cache hierarchy) and detected ISA
+backends.
 .TP
 .B run
 Execute selected CPU stress and SDC verification workloads.
@@ -136,7 +138,8 @@ Suppress the interactive ASCII banner in text mode.
 All executed workloads passed verification without hardware faults.
 .TP
 .B 1 (USAGE_ERROR)
-Invalid CLI arguments, unknown flag/subcommand/test/ISA, invalid duration, or conflicting
+Invalid CLI arguments, unknown flag/subcommand/test/ISA, invalid duration,
+or conflicting
 .BR "\-\-format text \-\-json" .
 .TP
 .B 2 (INIT_ERROR)
