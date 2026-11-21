@@ -1,0 +1,121 @@
+name: Bug Report
+description: Report a build failure, SIGILL/crash, ISA dispatch error, or verification failure in CrossCPU
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the defect and what you expected instead.
+      placeholder: "e.g., cross-cpu run --isa avx512 exits with SIGILL inside container or fails compilation with GCC 14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Linux (glibc)
+        - Linux (musl / Alpine)
+        - macOS (Apple Silicon / arm64)
+        - macOS (Intel / x86_64)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: CPU Architecture
+      options:
+        - x86_64
+        - arm64 / aarch64
+        - riscv64
+        - ppc64le / ppc64
+        - s390x
+        - Other POSIX CPU
+    validations:
+      required: true
+
+  - type: dropdown
+    id: isa
+    attributes:
+      label: Target ISA (`--isa`)
+      options:
+        - auto
+        - amx
+        - avx512
+        - avx2
+        - sse4
+        - sme
+        - sve
+        - neon
+        - rvv
+        - vsx
+        - vx
+        - scalar
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Method
+      options:
+        - PyPI prebuilt wheel
+        - Distro package (Debian / Ubuntu / Fedora / Arch / Nix)
+        - Homebrew
+        - Built from source / sdist (make build or pip install --no-binary)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: exit_code
+    attributes:
+      label: Observed Exit Code / Termination
+      options:
+        - "0 (SUCCESS — unexpected result)"
+        - "1 (USAGE_ERROR)"
+        - "2 (INIT_ERROR)"
+        - "3 (COMPUTE_ERROR)"
+        - "4 (HARDWARE_ERROR)"
+        - "SIGILL (Illegal Instruction)"
+        - "Other crash / signal (SIGSEGV, SIGBUS, etc.)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version, OS, Kernel & Compiler Details
+      description: Paste `cross-cpu --version`, `uname -a`, Python version, and `cc --version` (required for build/sdist issues). Note if running inside a VM or container.
+      render: shell
+      placeholder: |
+        cross-cpu 1.0.0
+        Python 3.12.7
+        Linux host 6.11.0 #1 SMP aarch64 GNU/Linux
+        gcc (GCC) 14.2.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: info_json
+    attributes:
+      label: Output of `cross-cpu info --json`
+      description: Run `cross-cpu info --json` and paste the complete JSON output (topology, cache sizes, detected ISA capabilities).
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro_verbose
+    attributes:
+      label: Failing Command & Verbose (`-v`) Output
+      description: Paste the exact command run with `-v` (including CPUID/HWCAP/sysctl probe traces, selected ISA, core affinity, and build logs if applicable).
+      render: shell
+      placeholder: |
+        $ cross-cpu run --cores physical --test compute-fp32 --duration 500ms -v
+        ...
+    validations:
+      required: true
