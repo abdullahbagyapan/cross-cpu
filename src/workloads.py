@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from .models import CPUTopology, WorkloadSpec
 
 SI_GIGA = 1_000_000_000.0
@@ -203,10 +206,27 @@ def _align_128(value: int, minimum: int = 4096) -> int:
     return n if rem == 0 else n + (128 - rem)
 
 
+def _linux_available_memory_bytes() -> int | None:
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        text = Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("MemAvailable:"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                return int(parts[1]) * 1024
+    return None
+
+
 def compute_workload_buffer_bytes(
     spec: WorkloadSpec,
     topology: CPUTopology,
     num_threads: int,
+    *,
+    available_memory_bytes: int | None = None,
 ) -> tuple[int, str | None]:
     """
     Compute per-thread working-set bytes dynamically from discovered topology.
@@ -216,20 +236,27 @@ def compute_workload_buffer_bytes(
     threads = max(1, int(num_threads))
     caches = topology.caches
     mem_cap_total = (
-        max(32 * 1024 * 1024, topology.memory_bytes // 4)
+        max(1024 * 1024, topology.memory_bytes // 4)
         if topology.memory_bytes > 0
         else 256 * 1024 * 1024
     )
-    mem_cap_per_thread = max(4 * 1024 * 1024, mem_cap_total // threads)
+    avail = (
+        available_memory_bytes
+        if available_memory_bytes is not None
+        else (_linux_available_memory_bytes() if topology.os_name == "Linux" else None)
+    )
+    if avail is not None and avail > 0:
+        mem_cap_total = min(mem_cap_total, max(1024 * 1024, avail // 2))
+    mem_cap_per_thread = max(64 * 1024, mem_cap_total // threads)
 
     if spec.name == "cache-l1":
         l1d = caches.l1d_bytes if caches.l1d_bytes > 0 else 32 * 1024
-        return _align_128(l1d // 2, minimum=4096), None
+        return _align_128(min(mem_cap_per_thread, l1d // 2), minimum=4096), None
 
     if spec.name == "cache-l2":
         l2 = caches.l2_bytes if caches.l2_bytes > 0 else 512 * 1024
         sharing = max(1, min(threads, caches.l2_shared_cpus))
-        return _align_128((l2 // 2) // sharing, minimum=16 * 1024), None
+        return _align_128(min(mem_cap_per_thread, (l2 // 2) // sharing), minimum=16 * 1024), None
 
     if spec.name == "cache-l3":
         if caches.discovered and caches.l3_bytes <= 0:
@@ -240,22 +267,25 @@ def compute_workload_buffer_bytes(
         l3 = caches.l3_bytes if caches.l3_bytes > 0 else 8 * 1024 * 1024
         sharing = max(1, min(threads, caches.l3_shared_cpus))
         per_thread = min(mem_cap_per_thread, (l3 // 2) // sharing)
-        return _align_128(per_thread, minimum=64 * 1024), None
+        return _align_128(per_thread, minimum=min(64 * 1024, mem_cap_per_thread)), None
 
     if spec.name == "bandwidth-ram":
         llc = caches.l3_bytes or caches.l2_bytes or (8 * 1024 * 1024)
-        # Ensure aggregate working set across all threads is >= 4x LLC
+        # Ensure aggregate working set across all threads is >= 4x LLC (capped safely for RAM)
         target_total = max(4 * llc, 32 * 1024 * 1024)
         per_thread = max(4 * 1024 * 1024, (target_total + threads - 1) // threads)
-        per_thread = min(per_thread, 64 * 1024 * 1024, mem_cap_per_thread)
-        return _align_128(per_thread, minimum=4 * 1024 * 1024), None
+        soft_ceiling = max(64 * 1024 * 1024, (2 * llc + threads - 1) // threads)
+        per_thread = min(per_thread, soft_ceiling, 256 * 1024 * 1024, mem_cap_per_thread)
+        return _align_128(per_thread, minimum=min(4 * 1024 * 1024, mem_cap_per_thread)), None
 
     if spec.name in ("memory-pattern", "memory-sweep"):
         llc = caches.l3_bytes or caches.l2_bytes or (4 * 1024 * 1024)
-        # Large enough to exceed caches while finishing cache-flushed sweeps cleanly in ms runs
-        per_thread = max(2 * 1024 * 1024, min(llc, 8 * 1024 * 1024))
-        per_thread = min(per_thread, mem_cap_per_thread)
-        return _align_128(per_thread, minimum=1024 * 1024), None
+        # Ensure aggregate working set across all threads exceeds LLC (>= 2x LLC) while OOM-safe
+        target_total = max(2 * llc, 16 * 1024 * 1024)
+        per_thread = max(2 * 1024 * 1024, (target_total + threads - 1) // threads)
+        soft_ceiling = max(8 * 1024 * 1024, (2 * llc + threads - 1) // threads)
+        per_thread = min(per_thread, soft_ceiling, 128 * 1024 * 1024, mem_cap_per_thread)
+        return _align_128(per_thread, minimum=min(1024 * 1024, mem_cap_per_thread)), None
 
     return 0, None
 
