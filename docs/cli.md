@@ -56,10 +56,10 @@ When multiple workloads execute in a single invocation, `cross-cpu` aggregates a
 | `1` | `USAGE_ERROR` | Invalid CLI syntax, unknown flag/subcommand/workload/ISA/preset, `--duration <= 0`, or conflicting `--format text --json`. |
 | `2` | `INIT_ERROR` | Native shared library load error, requested `--isa`/`--cores`/`--numa` unavailable on host, buffer allocation failure, or an explicitly requested `--test <name>` is unsupported. |
 | `3` | `COMPUTE_ERROR` | Numerical or bitwise SDC mismatch, unexpected `NaN`/`Inf`, NIST crypto KAT failure, DRAM bit error, or multi-core atomic coherency mismatch. |
-| `4` | `HARDWARE_ERROR` | Linux EDAC uncorrectable ECC memory error (`ue_count` delta `> 0`) or fatal hardware fault during stress execution. |
+| `4` | `HARDWARE_ERROR` | Fatal hardware fault reported during stress execution. |
 
 ## Stream Hygiene & Typo Ergonomics
 
-- **`stdout`:** Strictly reserved for primary command output (`text` tables or valid `json`), `--help`, and `--version`.
-- **`stderr`:** Strictly reserved for usage/init/compute/hardware error diagnostics, unsupported workload reasons, and `-v`/`--verbose` output.
+- **`stdout`:** Strictly reserved for primary command output (`text` tables or a single strict `json` document), `--help`, and `--version`.
+- **`stderr`:** Reserved for usage/init/compute/hardware error diagnostics, unsupported workload reasons, and `-v`/`--verbose` output in text mode. When `--json` (or `--format json`) is active, error and verbose diagnostics are suppressed so `stderr` remains completely clean.
 - **`difflib` Hints:** Mistyped subcommands, `--test` names, `--isa` backends, and `--cores` presets suggest the closest valid match.

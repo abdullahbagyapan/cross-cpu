@@ -36,6 +36,6 @@ dependencies = []
 cross-cpu = "cross_cpu.cli:main"
 
 [tool.setuptools]
-packages = ["cross_cpu", "cross_cpu.telemetry"]
+packages = ["cross_cpu"]
 package-dir = {"cross_cpu" = "src"}
 include-package-data = false

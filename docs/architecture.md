@@ -3,7 +3,7 @@
 `CrossCPU` is divided into two strictly decoupled layers:
 
 1. **Python 3.10+ Standard Library Orchestrator (`src/`):**
-   - CLI parsing (`src/cli.py`), `<80`-column ASCII banner (`src/banner.py`), exit-code aggregation (`src/exit_codes.py`), Linux `sysfs` & macOS `sysctl` topology discovery (`src/topology.py`), dynamic cache/memory working-set sizing (`src/workloads.py`), warmup/measurement runner (`src/runner.py`), and 1 Hz filtered telemetry (`src/telemetry/`).
+   - CLI parsing (`src/cli.py`), `<80`-column ASCII banner (`src/banner.py`), exit-code aggregation (`src/exit_codes.py`), Linux `sysfs` & macOS `sysctl` topology discovery (`src/topology.py`), dynamic cache/memory working-set sizing (`src/workloads.py`), and warmup/measurement runner (`src/runner.py`).
    - Zero external runtime dependencies (`ctypes`, `argparse`, `json`, `threading`, `signal`, `difflib`, `pathlib`, `dataclasses`, `struct`, `time`, `math`, `os`, `sys`, `abc`, `re`, `tarfile`, `unittest`).
    - Uses **relative imports only** inside `src/` so the source tree works both in-place (`./cross-cpu`) and installed (`site-packages/cross_cpu/`).
 

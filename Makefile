@@ -195,14 +195,13 @@ test: build
 	$(PYTHON) -m unittest discover -s tests -v
 
 install: build
-	install -d $(DESTDIR)$(PREFIX)/lib/cross-cpu/cross_cpu/telemetry
+	install -d $(DESTDIR)$(PREFIX)/lib/cross-cpu/cross_cpu
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -d $(DESTDIR)$(PREFIX)/share/man/man1
 	install -d $(DESTDIR)$(PREFIX)/share/bash-completion/completions
 	install -d $(DESTDIR)$(PREFIX)/share/zsh/site-functions
 	install -d $(DESTDIR)$(PREFIX)/share/fish/vendor_completions.d
 	install -m 644 src/*.py $(DESTDIR)$(PREFIX)/lib/cross-cpu/cross_cpu/
-	install -m 644 src/telemetry/*.py $(DESTDIR)$(PREFIX)/lib/cross-cpu/cross_cpu/telemetry/
 	install -m 755 $(TARGET_LIB) $(DESTDIR)$(PREFIX)/lib/cross-cpu/cross_cpu/
 	printf '#!/usr/bin/env python3\n# SPDX-License-Identifier: MIT\nimport sys\nsys.path.insert(0, "%s/lib/cross-cpu")\nfrom cross_cpu.cli import main\nraise SystemExit(main())\n' "$(PREFIX)" > $(DESTDIR)$(PREFIX)/bin/cross-cpu
 	chmod 755 $(DESTDIR)$(PREFIX)/bin/cross-cpu

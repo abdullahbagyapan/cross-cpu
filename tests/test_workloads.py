@@ -143,7 +143,11 @@ class TestNativeExecutionAndFaultInjection(unittest.TestCase):
             topology_override=self.topo,
         )
         self.assertEqual(rc, int(ExitCode.SUCCESS), msg=f"stderr={err.getvalue()}")
+        self.assertEqual(err.getvalue(), "")
         payload = json.loads(out.getvalue())
+        self.assertNotIn("telemetry", payload)
+        self.assertNotIn("edac_ce_delta", payload["summary"])
+        self.assertNotIn("edac_ue_delta", payload["summary"])
         self.assertEqual(payload["summary"]["passed"], len(tests))
         self.assertEqual(payload["summary"]["failed"], 0)
         for res in payload["results"]:
@@ -168,6 +172,7 @@ class TestNativeExecutionAndFaultInjection(unittest.TestCase):
                 int(ExitCode.COMPUTE_ERROR),
                 msg=f"Fault injection on {wl_name} must exit 3 (got {rc}, out={out.getvalue()})",
             )
+            self.assertEqual(err.getvalue(), "")
             payload = json.loads(out.getvalue())
             self.assertEqual(payload["results"][0]["status"], "failed")
             self.assertGreater(payload["results"][0]["error_count"], 0)
@@ -188,7 +193,20 @@ class TestNativeExecutionAndFaultInjection(unittest.TestCase):
         payload = json.loads(out.getvalue())
         self.assertEqual(payload["results"][0]["status"], "unsupported")
         self.assertTrue(len(payload["results"][0]["reason"]) > 0)
-        self.assertIn("unsupported", err.getvalue())
+        self.assertEqual(err.getvalue(), "")
+
+        # In text mode, unsupported reason is still emitted to stderr
+        out_txt = io.StringIO()
+        err_txt = io.StringIO()
+        rc_txt = main(
+            ["run", "--isa", "scalar", "--test", "compute-fp16", "--duration", "50ms"],
+            stdout=out_txt,
+            stderr=err_txt,
+            native_library=self.lib,
+            topology_override=self.topo,
+        )
+        self.assertEqual(rc_txt, int(ExitCode.INIT_ERROR))
+        self.assertIn("unsupported", err_txt.getvalue())
 
     def test_warmup_flag_runs_cleanly(self) -> None:
         out = io.StringIO()

@@ -15,11 +15,9 @@ Welcome to the `CrossCPU` (`cross-cpu`) documentation. `CrossCPU` is a modular, 
      - **Other Architectures** (`riscv64` `rvv`, `ppc64le`/`ppc64` `vsx`, `s390x` `vx`, and `generic` POSIX fallback)
 4. [**Workloads, Fixed Units & SDC Verification (`workloads.md`)**](workloads.md)
    - Mathematical specifications, fixed SI units (`GOP/s`, `GFLOP/s`, `GB/s`), topology-driven buffer sizing, and deterministic verification invariants for all 21 workloads.
-5. [**1 Hz Filtered Telemetry & EDAC Monitoring (`telemetry.md`)**](telemetry.md)
-   - Drift-compensated `TelemetrySampler` (`threading.Event.wait`), Linux `sysfs`/`procfs`/`hwmon`/`RAPL`/`EDAC` readers, macOS Mach `host_processor_info` reader, and sensor sanitization rules.
-6. [**Packaging, Distro Builds & FHS Installation (`packaging.md`)**](packaging.md)
+5. [**Packaging, Distro Builds & FHS Installation (`packaging.md`)**](packaging.md)
    - `pyproject.toml` `src/` -> `cross_cpu` mapping, offline wheel and `sdist` builds, multi-arch `Makefile` FHS installation, and shell completions.
-7. [**Contributing Guide (`contributing.md`)**](contributing.md)
+6. [**Contributing Guide (`contributing.md`)**](contributing.md)
    - Coding standards, SPDX headers, adding new ISA backends or workloads, fault-injection testing, and Conventional Commits workflow.
-8. [**Unix Manual Page (`cross-cpu.1`)**](cross-cpu.1)
+7. [**Unix Manual Page (`cross-cpu.1`)**](cross-cpu.1)
    - Standard `troff`/`man(1)` manual page installed to `$(PREFIX)/share/man/man1/cross-cpu.1`.

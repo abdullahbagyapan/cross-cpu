@@ -14,10 +14,9 @@ from typing import Any, Sequence, TextIO
 from . import __version__
 from .banner import maybe_print_banner, supports_color
 from .exit_codes import ExitCode
-from .models import CPUTopology, NativeCapabilities, TelemetrySample, WorkloadResult, WorkloadSpec
+from .models import CPUTopology, NativeCapabilities, WorkloadResult, WorkloadSpec
 from .native_bridge import ISA_NAME_TO_ID, NativeBridgeError, NativeLibrary
 from .runner import RunReport, WorkloadRunner, format_duration_progress
-from .telemetry import TelemetryReader, format_telemetry_line
 from .topology import (
     TopologyUnavailableError,
     TopologyUsageError,
@@ -75,6 +74,18 @@ def _resolve_output_format(fmt: str | None, json_flag: bool) -> str:
     if json_flag or fmt == "json":
         return "json"
     return "text"
+
+
+def _has_json_flag(raw_argv: Sequence[str]) -> bool:
+    """Return True if ``--json`` or ``--format json`` appears in ``raw_argv``."""
+    if "--json" in raw_argv:
+        return True
+    for idx, tok in enumerate(raw_argv):
+        if tok == "--format" and idx + 1 < len(raw_argv) and raw_argv[idx + 1] == "json":
+            return True
+        if tok == "--format=json":
+            return True
+    return False
 
 
 def _parse_test_selection(raw_tests: Sequence[str]) -> tuple[list[WorkloadSpec], bool]:
@@ -315,7 +326,7 @@ def _cmd_list(
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    if verbose:
+    if verbose and output_format != "json":
         _emit_verbose_probe(caps, topology, stderr)
 
     rows: list[dict[str, Any]] = []
@@ -379,7 +390,7 @@ def _cmd_info(
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:
-    if verbose:
+    if verbose and output_format != "json":
         _emit_verbose_probe(caps, topology, stderr)
 
     if output_format == "json":
@@ -454,9 +465,9 @@ def _cmd_run(
     verbose: bool,
     stdout: TextIO,
     stderr: TextIO,
-    telemetry_reader: TelemetryReader | None = None,
     inject_fault_workloads: set[str] | None = None,
 ) -> int:
+    json_mode = output_format == "json"
     duration_s = parse_duration(args.duration, allow_zero=False, flag_name="--duration")
     warmup_s = (
         parse_duration(args.warmup, allow_zero=True, flag_name="--warmup")
@@ -471,10 +482,11 @@ def _cmd_run(
     except TopologyUsageError as exc:
         raise CLIUsageError(str(exc)) from exc
     except TopologyUnavailableError as exc:
-        stderr.write(f"Error: {exc}\n")
+        if not json_mode:
+            stderr.write(f"Error: {exc}\n")
         return int(ExitCode.INIT_ERROR)
 
-    if verbose:
+    if verbose and not json_mode:
         _emit_verbose_probe(caps, topology, stderr)
         stderr.write(
             f"[verbose] cores={core_ids} qos_hint={qos_hint} "
@@ -484,7 +496,6 @@ def _cmd_run(
             stderr.write(f"[verbose] placement: {note}\n")
         stderr.flush()
 
-    json_mode = output_format == "json"
     use_color = supports_color(stdout)
     is_tty = False
     try:
@@ -521,24 +532,22 @@ def _cmd_run(
         label: str,
         elapsed_s: float,
         target_s: float,
-        sample: TelemetrySample | None,
     ) -> None:
         if json_mode or not is_tty:
             return
         prog = format_duration_progress(elapsed_s, target_s)
-        tel_str = f" | {format_telemetry_line(sample)}" if sample is not None else ""
-        line = f"[{idx:02d}/{total:02d} {label} | {prog}{tel_str}]"
+        line = f"[{idx:02d}/{total:02d} {label} | {prog}]"
         stdout.write(f"\r\033[K{line}")
         stdout.flush()
         progress_active[0] = True
 
     def _on_result(_idx: int, _total: int, res: WorkloadResult) -> None:
+        if json_mode:
+            return
         if res.status in ("unsupported", "init_error", "failed") and res.reason:
             stderr.write(f"[{res.status}] {res.name}: {res.reason}\n")
             stderr.flush()
 
-        if json_mode:
-            return
         _clear_progress()
         badge = _status_badge(res.status, use_color)
         if res.status in ("passed", "failed", "stopped"):
@@ -557,7 +566,7 @@ def _cmd_run(
         stdout.flush()
 
     def _on_diag(msg: str) -> None:
-        if verbose:
+        if verbose and not json_mode:
             stderr.write(f"[verbose] {msg}\n")
             stderr.flush()
 
@@ -565,7 +574,6 @@ def _cmd_run(
         native=native,
         topology=topology,
         caps=caps,
-        telemetry_reader=telemetry_reader,
     )
     report: RunReport = runner.run(
         workloads,
@@ -583,7 +591,7 @@ def _cmd_run(
 
     _clear_progress()
 
-    if report.hardware_fault_reason:
+    if report.hardware_fault_reason and not json_mode:
         stderr.write(f"[hardware_error] {report.hardware_fault_reason}\n")
         stderr.flush()
 
@@ -615,11 +623,8 @@ def _cmd_run(
                 "warmup_s": warmup_s,
             },
             "results": [r.to_dict() for r in report.results],
-            "telemetry": [s.to_dict() for s in report.telemetry],
             "summary": {
                 **counts,
-                "edac_ce_delta": report.edac_ce_delta,
-                "edac_ue_delta": report.edac_ue_delta,
                 "interrupted": report.interrupted,
                 "exit_code": int(report.exit_code),
                 "exit_name": report.exit_code.name,
@@ -640,16 +645,10 @@ def _cmd_run(
         summary_parts.append(f"{counts['init_error']} init_error")
     if counts["stopped"]:
         summary_parts.append(f"{counts['stopped']} stopped")
-    if report.edac_ue_delta > 0:
-        summary_parts.append(f"EDAC_UE=+{report.edac_ue_delta}")
     stdout.write(
         f"Summary: {', '.join(summary_parts)} | "
         f"Exit: {report.exit_code.name} ({int(report.exit_code)})\n"
     )
-    if report.telemetry:
-        last_line = format_telemetry_line(report.telemetry[-1])
-        if last_line:
-            stdout.write(f"Telemetry ({len(report.telemetry)} sample(s), last): {last_line}\n")
     stdout.flush()
     return int(report.exit_code)
 
@@ -661,7 +660,6 @@ def main(
     stderr: TextIO | None = None,
     native_library: NativeLibrary | None = None,
     topology_override: CPUTopology | None = None,
-    telemetry_reader: TelemetryReader | None = None,
     inject_fault_workloads: set[str] | None = None,
 ) -> int:
     """Main CLI entry point returning a severity-ordered ExitCode integer (0..4)."""
@@ -686,7 +684,8 @@ def main(
             code = exc.code if isinstance(exc.code, int) else 0
             return int(ExitCode.SUCCESS) if code == 0 else int(ExitCode.USAGE_ERROR)
         except CLIUsageError as exc:
-            err.write(f"Usage error: {exc}\n")
+            if not _has_json_flag(raw_argv):
+                err.write(f"Usage error: {exc}\n")
             return int(ExitCode.USAGE_ERROR)
 
         if not args.command:
@@ -699,6 +698,8 @@ def main(
             err.write(f"Usage error: {exc}\n")
             return int(ExitCode.USAGE_ERROR)
 
+        json_mode = output_format == "json"
+
         # Validate run syntax before loading native library so bad CLI args always exit 1
         if args.command == "run":
             try:
@@ -708,14 +709,16 @@ def main(
                 _validate_isa_name(args.isa)
                 _parse_test_selection(args.test)
             except CLIUsageError as exc:
-                err.write(f"Usage error: {exc}\n")
+                if not json_mode:
+                    err.write(f"Usage error: {exc}\n")
                 return int(ExitCode.USAGE_ERROR)
 
         try:
             native = native_library if native_library is not None else NativeLibrary()
             caps = native.get_caps()
         except NativeBridgeError as exc:
-            err.write(f"Initialization error: {exc}\n")
+            if not json_mode:
+                err.write(f"Initialization error: {exc}\n")
             return int(ExitCode.INIT_ERROR)
 
         topology = topology_override if topology_override is not None else discover_topology()
@@ -750,14 +753,15 @@ def main(
                     verbose=args.verbose,
                     stdout=out,
                     stderr=err,
-                    telemetry_reader=telemetry_reader,
                     inject_fault_workloads=inject_fault_workloads,
                 )
         except CLIUsageError as exc:
-            err.write(f"Usage error: {exc}\n")
+            if not json_mode:
+                err.write(f"Usage error: {exc}\n")
             return int(ExitCode.USAGE_ERROR)
 
-        err.write(f"Usage error: unknown command {args.command!r}\n")
+        if not json_mode:
+            err.write(f"Usage error: unknown command {args.command!r}\n")
         return int(ExitCode.USAGE_ERROR)
     finally:
         sys.stdout = orig_stdout

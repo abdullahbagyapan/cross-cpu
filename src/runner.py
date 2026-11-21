@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Workload execution engine with warmup, signal-to-C-atomic stop bridge, and 1 Hz telemetry."""
+"""Workload execution engine with warmup and signal-to-C-atomic stop bridge."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ import signal
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Sequence
+from typing import Callable, Sequence
 
 from .exit_codes import ExitCode, aggregate_exit_codes
-from .models import CPUTopology, NativeCapabilities, TelemetrySample, WorkloadResult, WorkloadSpec
+from .models import CPUTopology, NativeCapabilities, WorkloadResult, WorkloadSpec
 from .native_bridge import (
     STATUS_COMPUTE_ERROR,
     STATUS_INIT_ERROR,
@@ -19,7 +19,6 @@ from .native_bridge import (
     STATUS_UNSUPPORTED,
     NativeLibrary,
 )
-from .telemetry import TelemetryReader, TelemetrySampler
 from .workloads import compute_workload_buffer_bytes, scale_work_metrics
 
 
@@ -28,15 +27,12 @@ class RunReport:
     """Aggregated outcome of executing one or more workloads."""
 
     results: list[WorkloadResult] = field(default_factory=list)
-    telemetry: list[TelemetrySample] = field(default_factory=list)
-    edac_ce_delta: int = 0
-    edac_ue_delta: int = 0
     interrupted: bool = False
     hardware_fault_reason: str = ""
     exit_code: ExitCode = ExitCode.SUCCESS
 
 
-ProgressCallback = Callable[[int, int, str, float, float, Optional[TelemetrySample]], None]
+ProgressCallback = Callable[[int, int, str, float, float], None]
 ResultCallback = Callable[[int, int, WorkloadResult], None]
 DiagCallback = Callable[[str], None]
 
@@ -54,22 +50,17 @@ def format_duration_progress(elapsed_s: float, total_s: float) -> str:
 
 
 class WorkloadRunner:
-    """Orchestrates warmup, timed execution, signal cancellation, and filtered 1 Hz telemetry."""
+    """Orchestrates warmup, timed execution, and signal cancellation."""
 
     def __init__(
         self,
         native: NativeLibrary,
         topology: CPUTopology,
         caps: NativeCapabilities,
-        *,
-        telemetry_reader: TelemetryReader | None = None,
-        telemetry_interval_s: float = 1.0,
     ) -> None:
         self.native = native
         self.topology = topology
         self.caps = caps
-        self._telemetry_reader = telemetry_reader
-        self._telemetry_interval_s = telemetry_interval_s
 
     def run(
         self,
@@ -89,7 +80,6 @@ class WorkloadRunner:
         report = RunReport()
         codes: list[ExitCode] = [ExitCode.SUCCESS]
         stop_event = threading.Event()
-        latest_sample_box: list[TelemetrySample | None] = [None]
 
         # Validate forced ISA availability upfront before launching anything
         if requested_isa != "auto":
@@ -143,17 +133,7 @@ class WorkloadRunner:
             signal.signal(signal.SIGTERM, _handle_signal)
             installed_signals = True
 
-        def _on_sample(sample: TelemetrySample) -> None:
-            latest_sample_box[0] = sample
-
-        sampler = TelemetrySampler(
-            reader=self._telemetry_reader,
-            interval_s=self._telemetry_interval_s,
-            on_sample=_on_sample,
-        )
-
         self.native.reset_stop()
-        sampler.start()
         try:
             total_count = len(workloads)
             duration_ns = max(1_000_000, int(round(duration_s * 1_000_000_000.0)))
@@ -249,7 +229,6 @@ class WorkloadRunner:
                         label=f"{spec.name} (warmup)",
                         target_s=warmup_s,
                         stop_event=stop_event,
-                        latest_sample_box=latest_sample_box,
                         on_progress=on_progress,
                     )
                     if warm_raw["status"] == STATUS_COMPUTE_ERROR:
@@ -279,7 +258,6 @@ class WorkloadRunner:
                     label=spec.name,
                     target_s=duration_s,
                     stop_event=stop_event,
-                    latest_sample_box=latest_sample_box,
                     on_progress=on_progress,
                 )
                 res = self._raw_to_result(spec, raw, buf_bytes, explicit_tests=explicit_tests)
@@ -288,22 +266,10 @@ class WorkloadRunner:
                 if on_result:
                     on_result(idx, total_count, res)
         finally:
-            sampler.stop()
             self.native.reset_stop()
             if installed_signals:
                 signal.signal(signal.SIGINT, prev_sigint)
                 signal.signal(signal.SIGTERM, prev_sigterm)
-
-        report.telemetry = sampler.samples
-        report.edac_ce_delta = sampler.edac_ce_delta_total
-        report.edac_ue_delta = sampler.edac_ue_delta_total
-
-        if report.edac_ue_delta > 0:
-            report.hardware_fault_reason = (
-                f"EDAC reported +{report.edac_ue_delta} uncorrectable ECC memory error(s) "
-                "during stress run"
-            )
-            codes.append(ExitCode.HARDWARE_ERROR)
 
         report.exit_code = aggregate_exit_codes(codes)
         return report
@@ -324,7 +290,6 @@ class WorkloadRunner:
         label: str,
         target_s: float,
         stop_event: threading.Event,
-        latest_sample_box: list[TelemetrySample | None],
         on_progress: ProgressCallback | None,
     ) -> dict[str, int | float | str | None]:
         result_box: list[dict[str, int | float | str | None]] = []
@@ -356,13 +321,13 @@ class WorkloadRunner:
         while not done_event.wait(timeout=poll_s):
             if on_progress is not None:
                 elapsed = time.monotonic() - t_start
-                on_progress(idx, total_count, label, elapsed, target_s, latest_sample_box[0])
+                on_progress(idx, total_count, label, elapsed, target_s)
             if stop_event.is_set():
                 self.native.request_stop()
 
         thread.join()
         if on_progress is not None:
-            on_progress(idx, total_count, label, target_s, target_s, latest_sample_box[0])
+            on_progress(idx, total_count, label, target_s, target_s)
 
         if result_box:
             return result_box[0]

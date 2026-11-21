@@ -203,7 +203,7 @@ class TestPackagingAndHygiene(unittest.TestCase):
                 "native/arch/other/s390x/isa_vx.c",
                 "native/arch/other/generic/probe_generic.c",
                 "src/cli.py",
-                "src/telemetry/readers.py",
+                "src/runner.py",
                 "completions/cross-cpu.bash",
                 "completions/_cross-cpu",
                 "completions/cross-cpu.fish",

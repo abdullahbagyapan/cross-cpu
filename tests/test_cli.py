@@ -132,20 +132,31 @@ class TestCLIBehavior(unittest.TestCase):
         self.assertEqual(rc, int(ExitCode.USAGE_ERROR))
         self.assertIn("Conflicting", err)
 
-    def test_json_commands_emit_clean_stdout_and_verbose_stderr(self) -> None:
+    def test_json_commands_emit_clean_stdout_and_suppress_stderr_noise(self) -> None:
         rc, out, err = self._run_cli(["list", "--json", "-v"])
         self.assertEqual(rc, int(ExitCode.SUCCESS))
         data = json.loads(out)
         self.assertEqual(data["command"], "list")
         self.assertEqual(len(data["workloads"]), 21)
-        self.assertIn("[verbose]", err)
+        self.assertEqual(err, "")
 
-        rc, out, err = self._run_cli(["info", "--json"])
+        rc, out, err = self._run_cli(["info", "--json", "-v"])
         self.assertEqual(rc, int(ExitCode.SUCCESS))
         info = json.loads(out)
         self.assertEqual(info["command"], "info")
         self.assertIn("topology", info)
         self.assertIn("native", info)
+        self.assertEqual(err, "")
+
+        # Text mode with -v still emits verbose probe knowledge to stderr
+        rc, out, err = self._run_cli(["list", "-v"])
+        self.assertEqual(rc, int(ExitCode.SUCCESS))
+        self.assertIn("[verbose]", err)
+
+        # Usage error with --json suppresses stderr error text while keeping exit code 1
+        rc, out, err = self._run_cli(["run", "--test", "compute-fp33", "--duration", "100ms", "--json"])
+        self.assertEqual(rc, int(ExitCode.USAGE_ERROR))
+        self.assertEqual(out, "")
         self.assertEqual(err, "")
 
 

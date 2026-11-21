@@ -8,7 +8,7 @@ On disk, Python modules reside directly under `src/` and use **relative imports 
 
 ```toml
 [tool.setuptools]
-packages = ["cross_cpu", "cross_cpu.telemetry"]
+packages = ["cross_cpu"]
 package-dir = {"cross_cpu" = "src"}
 ```
 

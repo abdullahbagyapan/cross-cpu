@@ -10,7 +10,7 @@ It combines a **zero-dependency Python 3.10+ standard-library CLI orchestrator**
 - **Strict Architecture Isolation (`native/arch/`):** `native/core/` is 100% architecture-agnostic (`worker_pool.c`, `dispatch.c`), while architecture-specific probing, cache-flush primitives, and SIMD/matrix/crypto kernels live in isolated translation units under `native/arch/{common,x86_64,arm64,other}`.
 - **No `SIGILL` & Zero Fake Emulation:** Per-ISA translation units are compiled with probed per-file compiler flags and exposed through read-only kernel dispatch tables. Hardware-only workloads (`compute-vnni`, `compute-fp16`, `compute-bf16`, `compute-matrix-*`, `crypto-*`) never silently fall back to scalar C loops.
 - **21 Deterministic SDC-Verified Workloads:** Integer (`GOP/s`), Floating-Point & ML (`GFLOP/s`), Matrix Engines (`GFLOP/s` / `GOP/s`), Hardware Crypto KATs (`GB/s`), Cache Tiers (`GB/s`), Main Memory (`GB/s`), and Multi-Core Atomic Coherency (`GOP/s`).
-- **Filtered 1 Hz Telemetry & Severity-Ordered Exit Codes (`0..4`):** Sanitized Linux (`sysfs`/`procfs`/`hwmon`/`RAPL`/`EDAC`) and unprivileged macOS Mach telemetry without `N/A` noise or `null` JSON keys.
+- **Clean Single-Document JSON & Severity-Ordered Exit Codes (`0..4`):** Deterministic human tables or strict single-document `--json` output with clean `stdout`/`stderr` separation.
 
 ## Quick Start
 
@@ -38,7 +38,6 @@ make test
 - [System Architecture & C11 ABI](docs/architecture.md)
 - [ISA Backends (`x86_64`, `ARM64`, and `Other Architectures`)](docs/isa_backends.md)
 - [Workloads, Fixed Units & SDC Verification](docs/workloads.md)
-- [1 Hz Filtered Telemetry & EDAC Monitoring](docs/telemetry.md)
 - [Packaging, Distro Builds & FHS Installation](docs/packaging.md)
 - [Contributing Guide](docs/contributing.md)
 - [Unix `man(1)` Page (`cross-cpu.1`)](docs/cross-cpu.1)

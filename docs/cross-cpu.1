@@ -54,7 +54,7 @@ Inspect CPU topology (sockets, physical/logical cores, NUMA nodes, hybrid
 P-core/E-core clusters, L1i/L1d/L2/L3 cache hierarchy) and detected ISA backends.
 .TP
 .B run
-Execute selected CPU stress and SDC verification workloads with 1 Hz filtered telemetry.
+Execute selected CPU stress and SDC verification workloads.
 .SH OPTIONS
 .TP
 .BI \-\-cores " SPEC"
@@ -152,7 +152,7 @@ Silent Data Corruption (SDC) numerical/bitwise verification failure, unexpected
 crypto KAT mismatch, DRAM bit error, or atomic coherency mismatch.
 .TP
 .B 4 (HARDWARE_ERROR)
-Linux EDAC uncorrectable ECC memory error (\fBue_count\fR delta > 0) or fatal hardware fault.
+Fatal hardware fault reported during stress execution.
 .SH EXAMPLES
 .nf
 cross-cpu list

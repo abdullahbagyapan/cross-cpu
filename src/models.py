@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Structured dataclasses shared across topology, native bridge, telemetry, and CLI."""
+"""Structured dataclasses shared across topology, native bridge, runner, and CLI."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -139,23 +139,6 @@ class NativeCapabilities:
             "feature_flags": hex(self.feature_flags),
             "probe_summary": self.probe_summary,
             "backends": [b.to_dict() for b in self.backends],
-        }
-
-
-@dataclass(frozen=True)
-class TelemetrySample:
-    """A single sanitized 1 Hz telemetry snapshot (only valid metrics included)."""
-
-    timestamp_unix: float
-    elapsed_s: float
-    metrics: dict[str, float | int] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        clean = {k: v for k, v in self.metrics.items() if v is not None}
-        return {
-            "timestamp": round(self.timestamp_unix, 3),
-            "elapsed_s": round(self.elapsed_s, 3),
-            "metrics": clean,
         }
 
 

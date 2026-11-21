@@ -46,6 +46,6 @@ Format commit messages following [Conventional Commits](https://www.conventional
 - `feat(arch-arm64): ...`
 - `feat(arch-other): ...`
 - `feat(cli): ...`
-- `fix(telemetry): ...`
+- `fix(runner): ...`
 - `test(cross-cpu): ...`
 - `docs(cross-cpu): ...`
