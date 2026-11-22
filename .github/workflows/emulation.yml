@@ -1,0 +1,506 @@
+# SPDX-License-Identifier: MIT
+name: Environment Emulation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 0" # Weekly Sunday 04:00 UTC
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  x86-isa-sigill-matrix:
+    name: x86_64 Per-ISA Gating (QEMU user-mode)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install QEMU user-mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-user
+
+      - name: Build and verify x86_64 CPU tiers with per-command logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          mkdir -p "${LOG_DIR}"
+          PY="/usr/bin/python3"
+
+          run_logged() {
+            local name="$1"; shift
+            local out="${LOG_DIR}/${name}.stdout.log"
+            local err="${LOG_DIR}/${name}.stderr.log"
+            local rc=0
+            printf '::group::[RUN] %s: %s\n' "${name}" "$*"
+            "$@" >"${out}" 2>"${err}" || rc=$?
+            printf '%s\n' "${rc}" > "${LOG_DIR}/${name}.rc"
+            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+            cat "${out}"
+            if [[ -s "${err}" ]]; then
+              printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+              cat "${err}"
+            fi
+            printf '%s\n::endgroup::\n' "--- exit_code=${rc} ---"
+            return "${rc}"
+          }
+
+          run_logged_expect_rc() {
+            local expected="$1"; shift
+            local name="$1"; shift
+            local rc=0
+            run_logged "${name}" "$@" || rc=$?
+            if [[ "${rc}" -ne "${expected}" ]]; then
+              echo "FAIL [${name}]: expected exit code ${expected}, got ${rc}" >&2
+              return 1
+            fi
+          }
+
+          run_logged "01_make_build" make build
+
+          # Positive checks: -v logs CPUID/XCR0 probe traces to stderr while stdout stays strict JSON
+          for cpu in "qemu64" "Nehalem" "Haswell" "Skylake-Server"; do
+            slug="${cpu,,}"
+            run_logged "02_${slug}_info" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src.cli info --json -v
+            run_logged "02_${slug}_info_json_check" "${PY}" -m json.tool "${LOG_DIR}/02_${slug}_info.stdout.log"
+
+            run_logged "03_${slug}_run" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src.cli run \
+              --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
+              --duration 150ms --json -v
+            run_logged "03_${slug}_run_json_check" "${PY}" -m json.tool "${LOG_DIR}/03_${slug}_run.stdout.log"
+          done
+
+          # Negative ISA gates: must exit 2 (INIT_ERROR), never 132 (SIGILL) or 0 (silent fallback)
+          run_logged_expect_rc 2 "04_neg_qemu64_sse4" qemu-x86_64 -cpu "qemu64" "${PY}" -m src.cli run --isa sse4 --test compute-fp32 --duration 100ms --json -v
+          run_logged_expect_rc 2 "04_neg_qemu64_avx2" qemu-x86_64 -cpu "qemu64" "${PY}" -m src.cli run --isa avx2 --test compute-fp32 --duration 100ms --json -v
+          run_logged_expect_rc 2 "04_neg_nehalem_avx2" qemu-x86_64 -cpu "Nehalem" "${PY}" -m src.cli run --isa avx2 --test compute-fp32 --duration 100ms --json -v
+          run_logged_expect_rc 2 "04_neg_haswell_avx512" qemu-x86_64 -cpu "Haswell" "${PY}" -m src.cli run --isa avx512 --test compute-fp32 --duration 100ms --json -v
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### x86_64 Per-ISA Gating Logs"
+            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---:|---:|---:|"
+            shopt -s nullglob
+            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+              name="$(basename "${rc_file}" .rc)"
+              rc="$(cat "${rc_file}")"
+              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload command logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulation-logs-x86-isa
+          path: ${{ runner.temp }}/emulation-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  arm64-isa-sigill-matrix:
+    name: ARM64 Per-ISA Gating (QEMU user-mode)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install QEMU user-mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-user
+
+      - name: Build and verify ARM64 ISA tiers with per-command logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          mkdir -p "${LOG_DIR}"
+          PY="/usr/bin/python3"
+
+          run_logged() {
+            local name="$1"; shift
+            local out="${LOG_DIR}/${name}.stdout.log"
+            local err="${LOG_DIR}/${name}.stderr.log"
+            local rc=0
+            printf '::group::[RUN] %s: %s\n' "${name}" "$*"
+            "$@" >"${out}" 2>"${err}" || rc=$?
+            printf '%s\n' "${rc}" > "${LOG_DIR}/${name}.rc"
+            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+            cat "${out}"
+            if [[ -s "${err}" ]]; then
+              printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+              cat "${err}"
+            fi
+            printf '%s\n::endgroup::\n' "--- exit_code=${rc} ---"
+            return "${rc}"
+          }
+
+          run_logged "01_make_build" make build
+
+          for spec in "neon_only:max,sve=off,sme=off" "sve_on:max,sve=on,sme=off"; do
+            slug="${spec%%:*}"
+            cpu="${spec#*:}"
+            run_logged "02_${slug}_info" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src.cli info --json -v
+            run_logged "02_${slug}_info_json_check" "${PY}" -m json.tool "${LOG_DIR}/02_${slug}_info.stdout.log"
+
+            run_logged "03_${slug}_run" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src.cli run \
+              --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
+              --duration 150ms --json -v
+            run_logged "03_${slug}_run_json_check" "${PY}" -m json.tool "${LOG_DIR}/03_${slug}_run.stdout.log"
+          done
+
+          rc=0
+          run_logged "04_neg_neon_only_sve" qemu-aarch64 -cpu "max,sve=off,sme=off" "${PY}" -m src.cli run \
+            --isa sve --test compute-fp32 --duration 100ms --json -v || rc=$?
+          if [[ "${rc}" -ne 2 ]]; then
+            echo "FAIL: expected exit code 2 for --isa sve with sve=off, got ${rc}" >&2
+            exit 1
+          fi
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ARM64 Per-ISA Gating Logs"
+            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---:|---:|---:|"
+            shopt -s nullglob
+            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+              name="$(basename "${rc_file}" .rc)"
+              rc="$(cat "${rc_file}")"
+              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload command logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulation-logs-arm64-isa
+          path: ${{ runner.temp }}/emulation-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  foreign-arch-matrix:
+    name: Foreign Arch (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/arm64
+            slug: linux-arm64
+          - platform: linux/riscv64
+            slug: linux-riscv64
+          - platform: linux/ppc64le
+            slug: linux-ppc64le
+          - platform: linux/s390x # Big-endian verification
+            slug: linux-s390x
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU binfmt_misc
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,riscv64,ppc64le,s390x
+
+      - name: Build, unit-test, and smoke-test inside ${{ matrix.platform }} container
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          mkdir -p "${LOG_DIR}"
+
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -v "${GITHUB_WORKSPACE}:/repo:ro" \
+            -v "${LOG_DIR}:/logs:rw" \
+            debian:trixie-slim bash -euo pipefail -c '
+              trap "chmod -R a+rX /logs 2>/dev/null || true" EXIT
+
+              run_logged() {
+                local name="$1"; shift
+                local out="/logs/${name}.stdout.log"
+                local err="/logs/${name}.stderr.log"
+                local rc=0
+                printf "::group::[RUN] %s: %s\n" "${name}" "$*"
+                "$@" >"${out}" 2>"${err}" || rc=$?
+                printf "%s\n" "${rc}" > "/logs/${name}.rc"
+                printf "%s\n" "--- stdout (${name}.stdout.log) ---"
+                cat "${out}"
+                if [[ -s "${err}" ]]; then
+                  printf "%s\n" "--- stderr (${name}.stderr.log) ---"
+                  cat "${err}"
+                fi
+                printf "%s\n::endgroup::\n" "--- exit_code=${rc} ---"
+                return "${rc}"
+              }
+
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y --no-install-recommends \
+                python3 python3-venv python3-pip python3-setuptools python3-wheel python3-build \
+                gcc make libc6-dev
+
+              cp -a /repo /tmp/work
+              cd /tmp/work
+              rm -rf build dist ./*.egg-info
+
+              run_logged "01_env" uname -a
+              run_logged "02_cc_version" gcc --version
+              run_logged "03_compileall" python3 -m compileall -q src tests
+              run_logged "04_make_build" make build
+              run_logged "05_unittest" python3 -m unittest discover -s tests -v
+              run_logged "06_info" python3 -m src.cli info --json -v
+              run_logged "06_info_json_check" python3 -m json.tool /logs/06_info.stdout.log
+              run_logged "07_run" python3 -m src.cli run \
+                --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
+                --duration 100ms --json -v
+              run_logged "07_run_json_check" python3 -m json.tool /logs/07_run.stdout.log
+            '
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Foreign Arch Logs (${{ matrix.platform }})"
+            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---:|---:|---:|"
+            shopt -s nullglob
+            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+              name="$(basename "${rc_file}" .rc)"
+              rc="$(cat "${rc_file}")"
+              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload command logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulation-logs-arch-${{ matrix.slug }}
+          path: ${{ runner.temp }}/emulation-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  distro-libc-compiler-matrix:
+    name: Distro / Libc / Compiler (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: alpine-musl-gcc-clang
+            image: alpine:latest
+            install: "apk add --no-cache python3 py3-setuptools py3-wheel py3-build gcc clang musl-dev make bash"
+            cflags: "-O2 -Wall -Wextra"
+            test_clang: "1"
+          - name: debian-trixie-hardened
+            image: debian:trixie-slim
+            install: "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-setuptools python3-wheel python3-build gcc clang make libc6-dev"
+            cflags: "-O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong -Werror=format-security"
+            test_clang: "1"
+          - name: fedora-latest-gcc-clang
+            image: fedora:latest
+            install: "dnf install -y -q python3 python3-setuptools python3-wheel python3-build gcc clang make"
+            cflags: "-O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong"
+            test_clang: "1"
+          - name: archlinux-rolling
+            image: archlinux:latest
+            install: "pacman -Syu --noconfirm --needed python python-setuptools python-wheel python-build gcc clang make"
+            cflags: "-O2"
+            test_clang: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run build and offline test suite in ${{ matrix.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          mkdir -p "${LOG_DIR}"
+
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/repo:ro" \
+            -v "${LOG_DIR}:/logs:rw" \
+            -e "INSTALL_CMD=${{ matrix.install }}" \
+            -e "EXTRA_CFLAGS=${{ matrix.cflags }}" \
+            -e "TEST_CLANG=${{ matrix.test_clang }}" \
+            "${{ matrix.image }}" sh -eu -c '
+              trap "chmod -R a+rX /logs 2>/dev/null || true" EXIT
+
+              run_logged() {
+                _name="$1"; shift
+                _out="/logs/${_name}.stdout.log"
+                _err="/logs/${_name}.stderr.log"
+                _rc=0
+                printf "::group::[RUN] %s: %s\n" "${_name}" "$*"
+                "$@" >"${_out}" 2>"${_err}" || _rc=$?
+                printf "%s\n" "${_rc}" > "/logs/${_name}.rc"
+                printf "%s\n" "--- stdout (${_name}.stdout.log) ---"
+                cat "${_out}"
+                if [ -s "${_err}" ]; then
+                  printf "%s\n" "--- stderr (${_name}.stderr.log) ---"
+                  cat "${_err}"
+                fi
+                printf "%s\n::endgroup::\n" "--- exit_code=${_rc} ---"
+                return "${_rc}"
+              }
+
+              sh -eu -c "${INSTALL_CMD}"
+              cp -a /repo /tmp/work
+              cd /tmp/work
+              rm -rf build dist ./*.egg-info
+
+              run_logged "01_gcc_version" gcc --version
+              run_logged "02_build_gcc" env CFLAGS="${EXTRA_CFLAGS}" make build CC=gcc
+              run_logged "03_unittest_gcc" python3 -m unittest discover -s tests -v
+
+              if [ "${TEST_CLANG}" = "1" ]; then
+                make clean || true
+                run_logged "04_clang_version" clang --version
+                run_logged "05_build_clang" env CFLAGS="${EXTRA_CFLAGS}" make build CC=clang
+                run_logged "06_unittest_clang" python3 -m unittest discover -s tests -v
+              fi
+
+              run_logged "07_wheel_offline" python3 -m build --wheel --no-isolation --outdir /tmp/dist .
+            '
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Distro / Libc / Compiler Logs (${{ matrix.name }})"
+            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---:|---:|---:|"
+            shopt -s nullglob
+            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+              name="$(basename "${rc_file}" .rc)"
+              rc="$(cat "${rc_file}")"
+              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload command logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulation-logs-distro-${{ matrix.name }}
+          path: ${{ runner.temp }}/emulation-logs/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  adversarial-container-constraints:
+    name: Adversarial Constraints (Offline, Read-Only, Non-Root, Non-Contiguous CPU Set)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Pre-build wheel on host
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet setuptools wheel build
+          python3 -m build --wheel --no-isolation --outdir "${RUNNER_TEMP}/wheels" .
+
+      - name: Run offline, read-only, non-root, non-contiguous cpuset test with logging
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          mkdir -p "${LOG_DIR}"
+
+          CORES="$(nproc)"
+          if [[ "${CORES}" -ge 3 ]]; then
+            CPUSET="0,2"
+          elif [[ "${CORES}" -eq 2 ]]; then
+            CPUSET="1"
+          else
+            CPUSET="0"
+          fi
+          echo "Using cpuset=${CPUSET} (host nproc=${CORES})"
+
+          # Container stays strictly --read-only with zero writable bind mounts;
+          # host-side capture records stdout/stderr while inner commands print per-step logs.
+          rc=0
+          docker run --rm \
+            --network=none \
+            --read-only \
+            --tmpfs /tmp:rw,exec,size=256m \
+            --user 65534:65534 \
+            --cpuset-cpus="${CPUSET}" \
+            -e HOME=/tmp \
+            -e XDG_CACHE_HOME=/tmp/cache \
+            -v "${RUNNER_TEMP}/wheels:/wheels:ro" \
+            python:3.12-slim bash -euo pipefail -c '
+              run_inner() {
+                local name="$1"; shift
+                local out="/tmp/${name}.stdout.log"
+                local err="/tmp/${name}.stderr.log"
+                local irc=0
+                printf "::group::[RUN] %s: %s\n" "${name}" "$*"
+                "$@" >"${out}" 2>"${err}" || irc=$?
+                printf "%s\n" "--- stdout (${name}) ---"
+                cat "${out}"
+                if [[ -s "${err}" ]]; then
+                  printf "%s\n" "--- stderr (${name}) ---"
+                  cat "${err}"
+                fi
+                printf "%s\n::endgroup::\n" "--- exit_code=${irc} ---"
+                return "${irc}"
+              }
+
+              run_inner "01_venv_create" python3 -m venv /tmp/venv
+              run_inner "02_pip_install_offline" /tmp/venv/bin/pip install --no-index --no-deps /wheels/*.whl
+              cd /tmp
+              run_inner "03_version" /tmp/venv/bin/cross-cpu --version
+              run_inner "04_list" /tmp/venv/bin/cross-cpu list --json -v
+              run_inner "04_list_json_check" python3 -m json.tool /tmp/04_list.stdout.log
+              run_inner "05_info" /tmp/venv/bin/cross-cpu info --json -v
+              run_inner "05_info_json_check" python3 -m json.tool /tmp/05_info.stdout.log
+              run_inner "06_run" /tmp/venv/bin/cross-cpu run \
+                --cores all \
+                --test compute-fp32,compute-int64,cache-l1,memory-pattern,coherency-atomic \
+                --duration 150ms --json -v
+              run_inner "06_run_json_check" python3 -m json.tool /tmp/06_run.stdout.log
+            ' > >(tee "${LOG_DIR}/adversarial_container.stdout.log") \
+              2> >(tee "${LOG_DIR}/adversarial_container.stderr.log" >&2) || rc=$?
+
+          printf '%s\n' "${rc}" > "${LOG_DIR}/adversarial_container.rc"
+          exit "${rc}"
+
+      - name: Upload command logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulation-logs-adversarial
+          path: ${{ runner.temp }}/emulation-logs/
+          retention-days: 14
+          if-no-files-found: ignore
