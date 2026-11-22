@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cross-cpu"
-version = "0.1.0"
+version = "0.1.1"
 description = "Cross-platform CPU stress-testing and Silent Data Corruption (SDC) validation suite"
 requires-python = ">=3.10"
 license = "MIT"

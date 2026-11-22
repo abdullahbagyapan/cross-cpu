@@ -5,6 +5,20 @@ All notable changes to `CrossCPU` (`cross-cpu`) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-11-22
+
+### Fixed
+- **Native Worker Pool Responsiveness:** Immediately check C11 atomic stop flag in inner iteration batches to eliminate exit lag during early cancellation and timeouts.
+- **DRAM Cache-Flush Verification:** Explicitly evict cache lines in scalar `bandwidth-ram` and architecture-specific SIMD memory loops (`RVV`, `VSX`, `VX`) to guarantee main memory bus saturation rather than L1/L2 hits.
+- **s390x z14 Vector Instruction Isolation:** Guard vector float and double precision built-ins with `#pragma GCC target("vx,vxe")` and `__attribute__((target("vxe")))` on s390x to prevent illegal instruction traps on z13 hardware.
+- **ARM64 SVE/SME Vector Length Safety:** Enforce positive vector length bounds guards (`svcntb() > 0`, `svcntd() > 0`) preventing division-by-zero or infinite loops on unconfigured SVE/SME hardware.
+- **Dynamic DRAM Buffer Sizing:** Dynamically scale DRAM memory buffers strictly above LLC capacity per thread while enforcing low-RAM OOM caps to prevent thrashing.
+- **Generic Topology Fallback:** Provide portable CPU topology discovery on non-Linux, non-macOS POSIX environments.
+- **CI & Packaging:** Added GitHub issue templates, set explicit workflow permissions for security scanners, and cleaned up legacy test assertions.
+
+### Added
+- **Release Audit Regression Tests:** Comprehensive test suite for C11 ABI struct offsets, early stop cancellation responsiveness, full `--test all` workload invocation, fault injection on crypto and sweep kernels, and dynamic LLC buffer sizing.
+
 ## [0.1.0] - 2026-11-19
 
 ### Added
