@@ -489,13 +489,7 @@ def discover_macos_topology(
     )
 
 
-def discover_topology() -> CPUTopology:
-    """Discover host CPU topology for Linux, macOS, or generic POSIX fallback."""
-    if sys.platform.startswith("linux"):
-        return discover_linux_topology()
-    if sys.platform == "darwin":
-        return discover_macos_topology()
-
+def discover_generic_topology():
     count = os.cpu_count() or 1
     cores = tuple(
         CoreInfo(logical_id=i, physical_core_id=i, socket_id=0, numa_node=0)
@@ -519,6 +513,16 @@ def discover_topology() -> CPUTopology:
         pinning_note="Generic POSIX host; OS scheduler manages thread placement",
     )
 
+
+def discover_topology() -> CPUTopology:
+    """Discover host CPU topology for Linux, macOS, or generic POSIX fallback."""
+    if sys.platform.startswith("linux"):
+        return discover_linux_topology()
+    elif sys.platform.startswith("darwin"):
+        return discover_macos_topology()
+    else:
+        return discover_generic_topology()
+    
 
 def select_cores(
     topology: CPUTopology,
