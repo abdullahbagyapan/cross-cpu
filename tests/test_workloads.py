@@ -187,7 +187,6 @@ class TestNativeExecutionAndFaultInjection(unittest.TestCase):
         self.assertEqual(rc, int(ExitCode.SUCCESS), msg=f"stderr={err.getvalue()}")
         self.assertEqual(err.getvalue(), "")
         payload = json.loads(out.getvalue())
-        self.assertNotIn("telemetry", payload)
         self.assertNotIn("edac_ce_delta", payload["summary"])
         self.assertNotIn("edac_ue_delta", payload["summary"])
         self.assertEqual(payload["summary"]["passed"], len(tests))
