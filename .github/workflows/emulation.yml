@@ -16,6 +16,7 @@ jobs:
   x86-isa-sigill-matrix:
     name: x86_64 Per-ISA Gating (QEMU user-mode)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,8 +27,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends qemu-user
+          qemu-x86_64 --version
 
-      - name: Build and verify x86_64 CPU tiers with per-command logging
+      - name: Build and verify x86_64 CPU tiers with full error diagnostics
         shell: bash
         run: |
           set -euo pipefail
@@ -35,71 +37,244 @@ jobs:
           mkdir -p "${LOG_DIR}"
           PY="/usr/bin/python3"
 
-          run_logged() {
+          decode_rc() {
+            local code="$1"
+            case "${code}" in
+              132) echo "132 (SIGILL)" ;;
+              134) echo "134 (SIGABRT)" ;;
+              136) echo "136 (SIGFPE)" ;;
+              137) echo "137 (SIGKILL)" ;;
+              139) echo "139 (SIGSEGV)" ;;
+              143) echo "143 (SIGTERM)" ;;
+              *)
+                if (( code > 128 && code < 192 )); then
+                  echo "${code} (SIG$((code - 128)))"
+                else
+                  echo "${code}"
+                fi
+                ;;
+            esac
+          }
+
+          run_logged_expect() {
+            local expected="$1"; shift
             local name="$1"; shift
             local out="${LOG_DIR}/${name}.stdout.log"
             local err="${LOG_DIR}/${name}.stderr.log"
             local rc=0
-            printf '::group::[RUN] %s: %s\n' "${name}" "$*"
+            printf '%s\n' "$*" > "${LOG_DIR}/${name}.cmd"
+            printf '%s\n' "${expected}" > "${LOG_DIR}/${name}.expected_rc"
             "$@" >"${out}" 2>"${err}" || rc=$?
             printf '%s\n' "${rc}" > "${LOG_DIR}/${name}.rc"
-            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
-            cat "${out}"
-            if [[ -s "${err}" ]]; then
-              printf '%s\n' "--- stderr (${name}.stderr.log) ---"
-              cat "${err}"
+
+            if [[ "${rc}" -eq "${expected}" ]]; then
+              printf '::group::[PASS] %s (rc=%s): %s\n' "${name}" "${rc}" "$*"
+              if [[ -s "${out}" ]]; then
+                printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+                cat "${out}"
+              else
+                printf '%s\n' "--- stdout: (empty) ---"
+              fi
+              if [[ -s "${err}" ]]; then
+                printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+                cat "${err}"
+              fi
+              printf '%s\n::endgroup::\n' "--- exit_code=${rc} (expected=${expected}) ---"
+              return 0
             fi
-            printf '%s\n::endgroup::\n' "--- exit_code=${rc} ---"
-            return "${rc}"
+
+            local rc_desc
+            rc_desc="$(decode_rc "${rc}")"
+            printf '::error title=%s failed (rc=%s, expected=%s)::Command failed: %s\n' \
+              "${name}" "${rc_desc}" "${expected}" "$*"
+            printf '%s\n' "================================================================"
+            printf '[FAIL] %s\n' "${name}"
+            printf 'Command : %s\n' "$*"
+            printf 'Exit    : %s (expected %s)\n' "${rc_desc}" "${expected}"
+            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+            if [[ -s "${out}" ]]; then cat "${out}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+            if [[ -s "${err}" ]]; then cat "${err}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "================================================================"
+            return 1
           }
 
-          run_logged_expect_rc() {
+          run_logged() {
+            local name="$1"; shift
+            run_logged_expect 0 "${name}" "$@"
+          }
+
+          run_cli_json_expect() {
             local expected="$1"; shift
             local name="$1"; shift
-            local rc=0
-            run_logged "${name}" "$@" || rc=$?
-            if [[ "${rc}" -ne "${expected}" ]]; then
-              echo "FAIL [${name}]: expected exit code ${expected}, got ${rc}" >&2
-              return 1
+            if run_logged_expect "${expected}" "${name}" "$@"; then
+              return 0
             fi
+            # --json suppresses stderr by design; re-run without --json + -v when silent failure happens
+            if [[ ! -s "${LOG_DIR}/${name}.stdout.log" && ! -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+              local diag_cmd=()
+              local arg
+              for arg in "$@"; do
+                if [[ "${arg}" != "--json" ]]; then
+                  diag_cmd+=("${arg}")
+                fi
+              done
+              diag_cmd+=("-v")
+              printf '%s\n' ">>> Diagnostic retry without --json (with -v) for ${name}:"
+              run_logged_expect 0 "${name}_diag_verbose" "${diag_cmd[@]}" || true
+            fi
+            return 1
           }
 
+          run_logged "00_qemu_version" qemu-x86_64 --version
           run_logged "01_make_build" make build
 
-          # Positive checks: -v logs CPUID/XCR0 probe traces to stderr while stdout stays strict JSON
-          for cpu in "qemu64" "Nehalem" "Haswell" "Skylake-Server"; do
+          # Progressive x86_64 CPU tiers supported by QEMU TCG (avoids Skylake-Server TCG AVX-512 drop)
+          # Format: cpu_model:expected_fp32_isa_csv
+          for spec in "qemu64:scalar" "Nehalem:sse4" "Haswell:avx2" "max:avx2,avx512"; do
+            cpu="${spec%%:*}"
+            expected_isas="${spec#*:}"
             slug="${cpu,,}"
-            run_logged "02_${slug}_info" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src.cli info --json -v
-            run_logged "02_${slug}_info_json_check" "${PY}" -m json.tool "${LOG_DIR}/02_${slug}_info.stdout.log"
 
-            run_logged "03_${slug}_run" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src.cli run \
+            # Text + -v captures full CPUID/XCR0 probe trace on stderr
+            run_logged "02_${slug}_info_verbose" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src info -v
+
+            # Strict JSON info + schema assertions
+            run_cli_json_expect 0 "02_${slug}_info_json" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src info --json
+            run_logged "02_${slug}_info_assert" "${PY}" -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["command"] == "info", data
+          assert data["native"]["arch"] == "x86_64", data["native"]
+          assert data["native"]["endianness"] == "little", data["native"]
+          print("OK info:", data["native"]["probe_summary"])
+          ' "${LOG_DIR}/02_${slug}_info_json.stdout.log"
+
+            # Strict JSON workload run + ISA dispatch & zero-error assertions
+            run_cli_json_expect 0 "03_${slug}_run_json" qemu-x86_64 -cpu "${cpu}" "${PY}" -m src run \
               --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
-              --duration 150ms --json -v
-            run_logged "03_${slug}_run_json_check" "${PY}" -m json.tool "${LOG_DIR}/03_${slug}_run.stdout.log"
+              --duration 150ms --json
+            run_logged "03_${slug}_run_assert" "${PY}" -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          allowed = set(sys.argv[2].split(","))
+          assert data["summary"]["exit_code"] == 0, data["summary"]
+          assert data["summary"]["passed"] == 4, data["summary"]
+          assert data["summary"]["failed"] == 0, data["summary"]
+          by_name = {r["name"]: r for r in data["results"]}
+          for r in data["results"]:
+              assert r["status"] == "passed", r
+              assert r["error_count"] == 0, r
+              assert r["raw_ops"] > 0, r
+          fp32_isa = by_name["compute-fp32"]["isa"]
+          assert fp32_isa in allowed, f"expected compute-fp32 ISA in {sorted(allowed)}, got {fp32_isa!r}"
+          print(f"OK run ({sys.argv[1]}): compute-fp32 isa={fp32_isa}")
+          ' "${LOG_DIR}/03_${slug}_run_json.stdout.log" "${expected_isas}"
           done
 
-          # Negative ISA gates: must exit 2 (INIT_ERROR), never 132 (SIGILL) or 0 (silent fallback)
-          run_logged_expect_rc 2 "04_neg_qemu64_sse4" qemu-x86_64 -cpu "qemu64" "${PY}" -m src.cli run --isa sse4 --test compute-fp32 --duration 100ms --json -v
-          run_logged_expect_rc 2 "04_neg_qemu64_avx2" qemu-x86_64 -cpu "qemu64" "${PY}" -m src.cli run --isa avx2 --test compute-fp32 --duration 100ms --json -v
-          run_logged_expect_rc 2 "04_neg_nehalem_avx2" qemu-x86_64 -cpu "Nehalem" "${PY}" -m src.cli run --isa avx2 --test compute-fp32 --duration 100ms --json -v
-          run_logged_expect_rc 2 "04_neg_haswell_avx512" qemu-x86_64 -cpu "Haswell" "${PY}" -m src.cli run --isa avx512 --test compute-fp32 --duration 100ms --json -v
+          # Full --test all smoke under -cpu max (exercises AES-NI/SHA-NI if exposed by TCG; skips unsupported cleanly)
+          run_cli_json_expect 0 "03_max_run_all_json" qemu-x86_64 -cpu "max" "${PY}" -m src run \
+            --test all --duration 80ms --json
+          run_logged "03_max_run_all_assert" "${PY}" -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["summary"]["exit_code"] == 0, data["summary"]
+          assert data["summary"]["failed"] == 0, data["summary"]
+          assert data["summary"]["init_error"] == 0, data["summary"]
+          assert data["summary"]["passed"] >= 12, data["summary"]
+          print("OK --test all:", data["summary"])
+          ' "${LOG_DIR}/03_max_run_all_json.stdout.log"
+
+          # Negative ISA & hardware-only gates: must exit 2 (INIT_ERROR), never 132 (SIGILL) or 0 (silent fallback)
+          assert_neg_json() {
+            local log_name="$1"
+            local expected_status="$2"
+            run_logged "${log_name}_assert" "${PY}" -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          exp_status = sys.argv[2]
+          assert data["summary"]["exit_code"] == 2, data["summary"]
+          assert len(data["results"]) == 1, data["results"]
+          assert data["results"][0]["status"] == exp_status, data["results"][0]
+          assert data["results"][0]["reason"], data["results"][0]
+          print("OK negative gate:", data["results"][0]["status"], "-", data["results"][0]["reason"])
+          ' "${LOG_DIR}/${log_name}.stdout.log" "${expected_status}"
+          }
+
+          run_cli_json_expect 2 "04_neg_qemu64_sse4" qemu-x86_64 -cpu "qemu64" "${PY}" -m src run --isa sse4 --test compute-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_qemu64_sse4" "init_error"
+
+          run_cli_json_expect 2 "04_neg_qemu64_avx2" qemu-x86_64 -cpu "qemu64" "${PY}" -m src run --isa avx2 --test compute-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_qemu64_avx2" "init_error"
+
+          run_cli_json_expect 2 "04_neg_qemu64_crypto_aes" qemu-x86_64 -cpu "qemu64" "${PY}" -m src run --test crypto-aes --duration 100ms --json
+          assert_neg_json "04_neg_qemu64_crypto_aes" "unsupported"
+
+          run_cli_json_expect 2 "04_neg_nehalem_avx2" qemu-x86_64 -cpu "Nehalem" "${PY}" -m src run --isa avx2 --test compute-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_nehalem_avx2" "init_error"
+
+          run_cli_json_expect 2 "04_neg_haswell_avx512" qemu-x86_64 -cpu "Haswell" "${PY}" -m src run --isa avx512 --test compute-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_haswell_avx512" "init_error"
+
+          run_cli_json_expect 2 "04_neg_haswell_amx" qemu-x86_64 -cpu "Haswell" "${PY}" -m src run --isa amx --test compute-matrix-bf16 --duration 100ms --json
+          assert_neg_json "04_neg_haswell_amx" "init_error"
 
       - name: Write job summary
         if: always()
         shell: bash
         run: |
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
           {
             echo "### x86_64 Per-ISA Gating Logs"
-            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
-            echo "|---|---:|---:|---:|"
+            echo "| Status | Command | Exit (Expected) | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---|---|---:|---:|"
             shopt -s nullglob
-            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+            failures=()
+            rc_files=("${LOG_DIR}"/*.rc)
+            if [[ "${#rc_files[@]}" -eq 0 ]]; then
+              echo "| FAIL | _(no command logs recorded)_ | - | 0 | 0 |"
+            fi
+            for rc_file in "${rc_files[@]}"; do
               name="$(basename "${rc_file}" .rc)"
               rc="$(cat "${rc_file}")"
-              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+              exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+              out_b="$(wc -c < "${LOG_DIR}/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${LOG_DIR}/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              if [[ -n "${rc}" && "${rc}" == "${exp}" ]]; then
+                status="PASS"
+              else
+                status="FAIL"
+                failures+=("${name}")
+              fi
+              echo "| ${status} | \`${name}\` | \`${rc}\` (exp \`${exp}\`) | ${out_b} | ${err_b} |"
             done
+
+            if [[ "${#failures[@]}" -gt 0 ]]; then
+              echo ""
+              echo "#### Failure Details"
+              for name in "${failures[@]}"; do
+                rc="$(cat "${LOG_DIR}/${name}.rc")"
+                exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+                cmd="$(cat "${LOG_DIR}/${name}.cmd" 2>/dev/null || echo '(unknown)')"
+                echo ""
+                echo "**\`${name}\`** — exit \`${rc}\` (expected \`${exp}\`)"
+                echo '```text'
+                echo "Command: ${cmd}"
+                echo "--- stdout (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stdout.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stdout.log"
+                else
+                  echo "(empty)"
+                fi
+                echo "--- stderr (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stderr.log"
+                else
+                  echo "(empty)"
+                fi
+                echo '```'
+              done
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload command logs
@@ -114,6 +289,7 @@ jobs:
   arm64-isa-sigill-matrix:
     name: ARM64 Per-ISA Gating (QEMU user-mode)
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -124,8 +300,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends qemu-user
+          qemu-aarch64 --version
 
-      - name: Build and verify ARM64 ISA tiers with per-command logging
+      - name: Build and verify ARM64 ISA tiers with full error diagnostics
         shell: bash
         run: |
           set -euo pipefail
@@ -133,62 +310,236 @@ jobs:
           mkdir -p "${LOG_DIR}"
           PY="/usr/bin/python3"
 
-          run_logged() {
+          decode_rc() {
+            local code="$1"
+            case "${code}" in
+              132) echo "132 (SIGILL)" ;;
+              134) echo "134 (SIGABRT)" ;;
+              136) echo "136 (SIGFPE)" ;;
+              137) echo "137 (SIGKILL)" ;;
+              139) echo "139 (SIGSEGV)" ;;
+              143) echo "143 (SIGTERM)" ;;
+              *)
+                if (( code > 128 && code < 192 )); then
+                  echo "${code} (SIG$((code - 128)))"
+                else
+                  echo "${code}"
+                fi
+                ;;
+            esac
+          }
+
+          run_logged_expect() {
+            local expected="$1"; shift
             local name="$1"; shift
             local out="${LOG_DIR}/${name}.stdout.log"
             local err="${LOG_DIR}/${name}.stderr.log"
             local rc=0
-            printf '::group::[RUN] %s: %s\n' "${name}" "$*"
+            printf '%s\n' "$*" > "${LOG_DIR}/${name}.cmd"
+            printf '%s\n' "${expected}" > "${LOG_DIR}/${name}.expected_rc"
             "$@" >"${out}" 2>"${err}" || rc=$?
             printf '%s\n' "${rc}" > "${LOG_DIR}/${name}.rc"
-            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
-            cat "${out}"
-            if [[ -s "${err}" ]]; then
-              printf '%s\n' "--- stderr (${name}.stderr.log) ---"
-              cat "${err}"
+
+            if [[ "${rc}" -eq "${expected}" ]]; then
+              printf '::group::[PASS] %s (rc=%s): %s\n' "${name}" "${rc}" "$*"
+              if [[ -s "${out}" ]]; then
+                printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+                cat "${out}"
+              else
+                printf '%s\n' "--- stdout: (empty) ---"
+              fi
+              if [[ -s "${err}" ]]; then
+                printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+                cat "${err}"
+              fi
+              printf '%s\n::endgroup::\n' "--- exit_code=${rc} (expected=${expected}) ---"
+              return 0
             fi
-            printf '%s\n::endgroup::\n' "--- exit_code=${rc} ---"
-            return "${rc}"
+
+            local rc_desc
+            rc_desc="$(decode_rc "${rc}")"
+            printf '::error title=%s failed (rc=%s, expected=%s)::Command failed: %s\n' \
+              "${name}" "${rc_desc}" "${expected}" "$*"
+            printf '%s\n' "================================================================"
+            printf '[FAIL] %s\n' "${name}"
+            printf 'Command : %s\n' "$*"
+            printf 'Exit    : %s (expected %s)\n' "${rc_desc}" "${expected}"
+            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+            if [[ -s "${out}" ]]; then cat "${out}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+            if [[ -s "${err}" ]]; then cat "${err}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "================================================================"
+            return 1
           }
 
+          run_logged() {
+            local name="$1"; shift
+            run_logged_expect 0 "${name}" "$@"
+          }
+
+          run_cli_json_expect() {
+            local expected="$1"; shift
+            local name="$1"; shift
+            if run_logged_expect "${expected}" "${name}" "$@"; then
+              return 0
+            fi
+            if [[ ! -s "${LOG_DIR}/${name}.stdout.log" && ! -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+              local diag_cmd=()
+              local arg
+              for arg in "$@"; do
+                if [[ "${arg}" != "--json" ]]; then
+                  diag_cmd+=("${arg}")
+                fi
+              done
+              diag_cmd+=("-v")
+              printf '%s\n' ">>> Diagnostic retry without --json (with -v) for ${name}:"
+              run_logged_expect 0 "${name}_diag_verbose" "${diag_cmd[@]}" || true
+            fi
+            return 1
+          }
+
+          run_logged "00_qemu_version" qemu-aarch64 --version
           run_logged "01_make_build" make build
 
-          for spec in "neon_only:max,sve=off,sme=off" "sve_on:max,sve=on,sme=off"; do
+          # Progressive ARM64 CPU tiers: ARMv8.0 baseline (cortex-a53), NEON-only max, and SVE-enabled max
+          for spec in \
+            "cortex_a53:cortex-a53:neon" \
+            "neon_only:max,sve=off,sme=off:neon" \
+            "sve_on:max,sve=on,sme=off:sve_if_compiled"; do
             slug="${spec%%:*}"
-            cpu="${spec#*:}"
-            run_logged "02_${slug}_info" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src.cli info --json -v
-            run_logged "02_${slug}_info_json_check" "${PY}" -m json.tool "${LOG_DIR}/02_${slug}_info.stdout.log"
+            rest="${spec#*:}"
+            cpu="${rest%%:*}"
+            expected_mode="${rest#*:}"
 
-            run_logged "03_${slug}_run" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src.cli run \
+            run_logged "02_${slug}_info_verbose" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src info -v
+            run_cli_json_expect 0 "02_${slug}_info_json" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src info --json
+            run_logged "02_${slug}_info_assert" "${PY}" -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["command"] == "info", data
+          assert data["native"]["arch"] == "arm64", data["native"]
+          assert data["native"]["endianness"] == "little", data["native"]
+          print("OK info:", data["native"]["probe_summary"])
+          ' "${LOG_DIR}/02_${slug}_info_json.stdout.log"
+
+            run_cli_json_expect 0 "03_${slug}_run_json" qemu-aarch64 -cpu "${cpu}" "${PY}" -m src run \
               --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
-              --duration 150ms --json -v
-            run_logged "03_${slug}_run_json_check" "${PY}" -m json.tool "${LOG_DIR}/03_${slug}_run.stdout.log"
+              --duration 150ms --json
+            run_logged "03_${slug}_run_assert" "${PY}" -c '
+          import json, sys
+          info = json.load(open(sys.argv[1], encoding="utf-8"))
+          run_data = json.load(open(sys.argv[2], encoding="utf-8"))
+          mode = sys.argv[3]
+          assert run_data["summary"]["exit_code"] == 0, run_data["summary"]
+          assert run_data["summary"]["passed"] == 4, run_data["summary"]
+          assert run_data["summary"]["failed"] == 0, run_data["summary"]
+          for r in run_data["results"]:
+              assert r["status"] == "passed", r
+              assert r["error_count"] == 0, r
+              assert r["raw_ops"] > 0, r
+          backends = {b["name"]: b for b in info["native"]["backends"]}
+          if mode == "sve_if_compiled":
+              expected_isa = "sve" if backends.get("sve", {}).get("compiled_in") else "neon"
+          else:
+              expected_isa = mode
+          by_name = {r["name"]: r for r in run_data["results"]}
+          got_isa = by_name["compute-fp32"]["isa"]
+          assert got_isa == expected_isa, f"expected compute-fp32 isa={expected_isa!r}, got {got_isa!r}"
+          print(f"OK run ({mode}): compute-fp32 isa={got_isa}")
+          ' "${LOG_DIR}/02_${slug}_info_json.stdout.log" "${LOG_DIR}/03_${slug}_run_json.stdout.log" "${expected_mode}"
           done
 
-          rc=0
-          run_logged "04_neg_neon_only_sve" qemu-aarch64 -cpu "max,sve=off,sme=off" "${PY}" -m src.cli run \
-            --isa sve --test compute-fp32 --duration 100ms --json -v || rc=$?
-          if [[ "${rc}" -ne 2 ]]; then
-            echo "FAIL: expected exit code 2 for --isa sve with sve=off, got ${rc}" >&2
-            exit 1
-          fi
+          assert_neg_json() {
+            local log_name="$1"
+            local expected_status="$2"
+            run_logged "${log_name}_assert" "${PY}" -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          exp_status = sys.argv[2]
+          assert data["summary"]["exit_code"] == 2, data["summary"]
+          assert len(data["results"]) == 1, data["results"]
+          assert data["results"][0]["status"] == exp_status, data["results"][0]
+          assert data["results"][0]["reason"], data["results"][0]
+          print("OK negative gate:", data["results"][0]["status"], "-", data["results"][0]["reason"])
+          ' "${LOG_DIR}/${log_name}.stdout.log" "${expected_status}"
+          }
+
+          run_cli_json_expect 2 "04_neg_cortex_a53_fp16" qemu-aarch64 -cpu "cortex-a53" "${PY}" -m src run \
+            --test compute-fp16 --duration 100ms --json
+          assert_neg_json "04_neg_cortex_a53_fp16" "unsupported"
+
+          run_cli_json_expect 2 "04_neg_cortex_a53_sve" qemu-aarch64 -cpu "cortex-a53" "${PY}" -m src run \
+            --isa sve --test compute-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_cortex_a53_sve" "init_error"
+
+          run_cli_json_expect 2 "04_neg_neon_only_sve" qemu-aarch64 -cpu "max,sve=off,sme=off" "${PY}" -m src run \
+            --isa sve --test compute-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_neon_only_sve" "init_error"
+
+          run_cli_json_expect 2 "04_neg_neon_only_sme" qemu-aarch64 -cpu "max,sve=off,sme=off" "${PY}" -m src run \
+            --isa sme --test compute-matrix-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_neon_only_sme" "init_error"
+
+          run_cli_json_expect 2 "04_neg_sve_on_sme" qemu-aarch64 -cpu "max,sve=on,sme=off" "${PY}" -m src run \
+            --isa sme --test compute-matrix-fp32 --duration 100ms --json
+          assert_neg_json "04_neg_sve_on_sme" "init_error"
 
       - name: Write job summary
         if: always()
         shell: bash
         run: |
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
           {
             echo "### ARM64 Per-ISA Gating Logs"
-            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
-            echo "|---|---:|---:|---:|"
+            echo "| Status | Command | Exit (Expected) | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---|---|---:|---:|"
             shopt -s nullglob
-            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+            failures=()
+            rc_files=("${LOG_DIR}"/*.rc)
+            if [[ "${#rc_files[@]}" -eq 0 ]]; then
+              echo "| FAIL | _(no command logs recorded)_ | - | 0 | 0 |"
+            fi
+            for rc_file in "${rc_files[@]}"; do
               name="$(basename "${rc_file}" .rc)"
               rc="$(cat "${rc_file}")"
-              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+              exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+              out_b="$(wc -c < "${LOG_DIR}/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${LOG_DIR}/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              if [[ -n "${rc}" && "${rc}" == "${exp}" ]]; then
+                status="PASS"
+              else
+                status="FAIL"
+                failures+=("${name}")
+              fi
+              echo "| ${status} | \`${name}\` | \`${rc}\` (exp \`${exp}\`) | ${out_b} | ${err_b} |"
             done
+
+            if [[ "${#failures[@]}" -gt 0 ]]; then
+              echo ""
+              echo "#### Failure Details"
+              for name in "${failures[@]}"; do
+                rc="$(cat "${LOG_DIR}/${name}.rc")"
+                exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+                cmd="$(cat "${LOG_DIR}/${name}.cmd" 2>/dev/null || echo '(unknown)')"
+                echo ""
+                echo "**\`${name}\`** — exit \`${rc}\` (expected \`${exp}\`)"
+                echo '```text'
+                echo "Command: ${cmd}"
+                echo "--- stdout (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stdout.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stdout.log"
+                else
+                  echo "(empty)"
+                fi
+                echo "--- stderr (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stderr.log"
+                else
+                  echo "(empty)"
+                fi
+                echo '```'
+              done
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload command logs
@@ -203,97 +554,246 @@ jobs:
   foreign-arch-matrix:
     name: Foreign Arch (${{ matrix.platform }})
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: linux/arm64
             slug: linux-arm64
+            qemu_platform: arm64
+            expected_arch: arm64
+            expected_endian: little
           - platform: linux/riscv64
             slug: linux-riscv64
+            qemu_platform: riscv64
+            expected_arch: riscv64
+            expected_endian: little
           - platform: linux/ppc64le
             slug: linux-ppc64le
+            qemu_platform: ppc64le
+            expected_arch: ppc64le
+            expected_endian: little
           - platform: linux/s390x # Big-endian verification
             slug: linux-s390x
+            qemu_platform: s390x
+            expected_arch: s390x
+            expected_endian: big
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU binfmt_misc
+      - name: Set up QEMU binfmt_misc (${{ matrix.qemu_platform }})
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: arm64,riscv64,ppc64le,s390x
+          platforms: ${{ matrix.qemu_platform }}
 
       - name: Build, unit-test, and smoke-test inside ${{ matrix.platform }} container
         shell: bash
+        env:
+          TARGET_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCH: ${{ matrix.expected_arch }}
+          EXPECTED_ENDIAN: ${{ matrix.expected_endian }}
         run: |
           set -euo pipefail
           LOG_DIR="${RUNNER_TEMP}/emulation-logs"
           mkdir -p "${LOG_DIR}"
 
-          docker run --rm --platform "${{ matrix.platform }}" \
+          docker run -i --rm --platform "${TARGET_PLATFORM}" \
             -v "${GITHUB_WORKSPACE}:/repo:ro" \
             -v "${LOG_DIR}:/logs:rw" \
-            debian:trixie-slim bash -euo pipefail -c '
-              trap "chmod -R a+rX /logs 2>/dev/null || true" EXIT
+            -e EXPECTED_ARCH="${EXPECTED_ARCH}" \
+            -e EXPECTED_ENDIAN="${EXPECTED_ENDIAN}" \
+            debian:trixie-slim bash -euo pipefail <<'EOF'
+          trap 'chmod -R a+rX /logs 2>/dev/null || true' EXIT
 
-              run_logged() {
-                local name="$1"; shift
-                local out="/logs/${name}.stdout.log"
-                local err="/logs/${name}.stderr.log"
-                local rc=0
-                printf "::group::[RUN] %s: %s\n" "${name}" "$*"
-                "$@" >"${out}" 2>"${err}" || rc=$?
-                printf "%s\n" "${rc}" > "/logs/${name}.rc"
-                printf "%s\n" "--- stdout (${name}.stdout.log) ---"
-                cat "${out}"
-                if [[ -s "${err}" ]]; then
-                  printf "%s\n" "--- stderr (${name}.stderr.log) ---"
-                  cat "${err}"
+          decode_rc() {
+            local code="$1"
+            case "${code}" in
+              132) echo "132 (SIGILL)" ;;
+              134) echo "134 (SIGABRT)" ;;
+              136) echo "136 (SIGFPE)" ;;
+              137) echo "137 (SIGKILL)" ;;
+              139) echo "139 (SIGSEGV)" ;;
+              143) echo "143 (SIGTERM)" ;;
+              *)
+                if (( code > 128 && code < 192 )); then
+                  echo "${code} (SIG$((code - 128)))"
+                else
+                  echo "${code}"
                 fi
-                printf "%s\n::endgroup::\n" "--- exit_code=${rc} ---"
-                return "${rc}"
-              }
+                ;;
+            esac
+          }
 
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get update -qq
-              apt-get install -y --no-install-recommends \
-                python3 python3-venv python3-pip python3-setuptools python3-wheel python3-build \
-                gcc make libc6-dev
+          run_logged_expect() {
+            local expected="$1"; shift
+            local name="$1"; shift
+            local out="/logs/${name}.stdout.log"
+            local err="/logs/${name}.stderr.log"
+            local rc=0
+            printf '%s\n' "$*" > "/logs/${name}.cmd"
+            printf '%s\n' "${expected}" > "/logs/${name}.expected_rc"
+            "$@" >"${out}" 2>"${err}" || rc=$?
+            printf '%s\n' "${rc}" > "/logs/${name}.rc"
 
-              cp -a /repo /tmp/work
-              cd /tmp/work
-              rm -rf build dist ./*.egg-info
+            if [[ "${rc}" -eq "${expected}" ]]; then
+              printf '::group::[PASS] %s (rc=%s): %s\n' "${name}" "${rc}" "$*"
+              if [[ -s "${out}" ]]; then
+                printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+                cat "${out}"
+              else
+                printf '%s\n' "--- stdout: (empty) ---"
+              fi
+              if [[ -s "${err}" ]]; then
+                printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+                cat "${err}"
+              fi
+              printf '%s\n::endgroup::\n' "--- exit_code=${rc} (expected=${expected}) ---"
+              return 0
+            fi
 
-              run_logged "01_env" uname -a
-              run_logged "02_cc_version" gcc --version
-              run_logged "03_compileall" python3 -m compileall -q src tests
-              run_logged "04_make_build" make build
-              run_logged "05_unittest" python3 -m unittest discover -s tests -v
-              run_logged "06_info" python3 -m src.cli info --json -v
-              run_logged "06_info_json_check" python3 -m json.tool /logs/06_info.stdout.log
-              run_logged "07_run" python3 -m src.cli run \
-                --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
-                --duration 100ms --json -v
-              run_logged "07_run_json_check" python3 -m json.tool /logs/07_run.stdout.log
-            '
+            local rc_desc
+            rc_desc="$(decode_rc "${rc}")"
+            printf '::error title=%s failed (rc=%s, expected=%s)::Command failed: %s\n' \
+              "${name}" "${rc_desc}" "${expected}" "$*"
+            printf '%s\n' "================================================================"
+            printf '[FAIL] %s\n' "${name}"
+            printf 'Command : %s\n' "$*"
+            printf 'Exit    : %s (expected %s)\n' "${rc_desc}" "${expected}"
+            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+            if [[ -s "${out}" ]]; then cat "${out}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+            if [[ -s "${err}" ]]; then cat "${err}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "================================================================"
+            return 1
+          }
+
+          run_logged() {
+            local name="$1"; shift
+            run_logged_expect 0 "${name}" "$@"
+          }
+
+          run_cli_json_expect() {
+            local expected="$1"; shift
+            local name="$1"; shift
+            if run_logged_expect "${expected}" "${name}" "$@"; then
+              return 0
+            fi
+            if [[ ! -s "/logs/${name}.stdout.log" && ! -s "/logs/${name}.stderr.log" ]]; then
+              local diag_cmd=()
+              local arg
+              for arg in "$@"; do
+                if [[ "${arg}" != "--json" ]]; then
+                  diag_cmd+=("${arg}")
+                fi
+              done
+              diag_cmd+=("-v")
+              printf '%s\n' ">>> Diagnostic retry without --json (with -v) for ${name}:"
+              run_logged_expect 0 "${name}_diag_verbose" "${diag_cmd[@]}" || true
+            fi
+            return 1
+          }
+
+          export DEBIAN_FRONTEND=noninteractive
+          run_logged "00_apt_install" bash -euo pipefail -c \
+            'apt-get update -qq && apt-get install -y --no-install-recommends python3 python3-setuptools gcc make libc6-dev'
+
+          cp -a /repo /tmp/work
+          cd /tmp/work
+          rm -rf build dist ./*.egg-info
+
+          run_logged "01_env" uname -a
+          run_logged "02_cc_version" gcc --version
+          run_logged "03_compileall" python3 -m compileall -q src tests
+          run_logged "04_make_build" make build
+          run_logged "05_unittest" python3 -m unittest discover -s tests -v
+          run_logged "06_info_verbose" python3 -m src info -v
+          run_cli_json_expect 0 "07_info_json" python3 -m src info --json
+          run_logged "07_info_assert" python3 -c '
+          import json, os, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["command"] == "info", data
+          assert data["native"]["arch"] == os.environ["EXPECTED_ARCH"], data["native"]
+          assert data["native"]["endianness"] == os.environ["EXPECTED_ENDIAN"], data["native"]
+          print("OK info:", data["native"]["arch"], data["native"]["endianness"], data["native"]["probe_summary"])
+          ' /logs/07_info_json.stdout.log
+
+          run_cli_json_expect 0 "08_run_json" python3 -m src run \
+            --test compute-fp32,compute-int64,memory-pattern,coherency-atomic \
+            --duration 100ms --json
+          run_logged "08_run_assert" python3 -c '
+          import json, os, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["host"]["arch"] == os.environ["EXPECTED_ARCH"], data["host"]
+          assert data["host"]["endianness"] == os.environ["EXPECTED_ENDIAN"], data["host"]
+          assert data["summary"]["exit_code"] == 0, data["summary"]
+          assert data["summary"]["passed"] == 4, data["summary"]
+          assert data["summary"]["failed"] == 0, data["summary"]
+          for r in data["results"]:
+              assert r["status"] == "passed", r
+              assert r["error_count"] == 0, r
+              assert r["raw_ops"] > 0, r
+          print("OK run:", [(r["name"], r["isa"], round(r["rate"], 3)) for r in data["results"]])
+          ' /logs/08_run_json.stdout.log
+          EOF
 
       - name: Write job summary
         if: always()
         shell: bash
         run: |
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
           {
             echo "### Foreign Arch Logs (${{ matrix.platform }})"
-            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
-            echo "|---|---:|---:|---:|"
+            echo "| Status | Command | Exit (Expected) | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---|---|---:|---:|"
             shopt -s nullglob
-            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+            failures=()
+            rc_files=("${LOG_DIR}"/*.rc)
+            if [[ "${#rc_files[@]}" -eq 0 ]]; then
+              echo "| FAIL | _(no command logs recorded)_ | - | 0 | 0 |"
+            fi
+            for rc_file in "${rc_files[@]}"; do
               name="$(basename "${rc_file}" .rc)"
               rc="$(cat "${rc_file}")"
-              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+              exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+              out_b="$(wc -c < "${LOG_DIR}/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${LOG_DIR}/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              if [[ -n "${rc}" && "${rc}" == "${exp}" ]]; then
+                status="PASS"
+              else
+                status="FAIL"
+                failures+=("${name}")
+              fi
+              echo "| ${status} | \`${name}\` | \`${rc}\` (exp \`${exp}\`) | ${out_b} | ${err_b} |"
             done
+
+            if [[ "${#failures[@]}" -gt 0 ]]; then
+              echo ""
+              echo "#### Failure Details"
+              for name in "${failures[@]}"; do
+                rc="$(cat "${LOG_DIR}/${name}.rc")"
+                exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+                cmd="$(cat "${LOG_DIR}/${name}.cmd" 2>/dev/null || echo '(unknown)')"
+                echo ""
+                echo "**\`${name}\`** — exit \`${rc}\` (expected \`${exp}\`)"
+                echo '```text'
+                echo "Command: ${cmd}"
+                echo "--- stdout (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stdout.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stdout.log"
+                else
+                  echo "(empty)"
+                fi
+                echo "--- stderr (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stderr.log"
+                else
+                  echo "(empty)"
+                fi
+                echo '```'
+              done
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload command logs
@@ -308,28 +808,29 @@ jobs:
   distro-libc-compiler-matrix:
     name: Distro / Libc / Compiler (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: alpine-musl-gcc-clang
             image: alpine:latest
-            install: "apk add --no-cache python3 py3-setuptools py3-wheel py3-build gcc clang musl-dev make bash"
+            install: "apk add --no-cache python3 python3-dev py3-setuptools py3-wheel py3-build gcc clang musl-dev make bash"
             cflags: "-O2 -Wall -Wextra"
             test_clang: "1"
           - name: debian-trixie-hardened
             image: debian:trixie-slim
-            install: "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-setuptools python3-wheel python3-build gcc clang make libc6-dev"
+            install: "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 python3-dev python3-setuptools python3-wheel python3-build gcc clang make libc6-dev"
             cflags: "-O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong -Werror=format-security"
             test_clang: "1"
           - name: fedora-latest-gcc-clang
             image: fedora:latest
-            install: "dnf install -y -q python3 python3-setuptools python3-wheel python3-build gcc clang make"
+            install: "dnf install -y -q python3 python3-devel python3-setuptools python3-wheel python3-build gcc clang make redhat-rpm-config"
             cflags: "-O2 -D_FORTIFY_SOURCE=3 -fstack-protector-strong"
             test_clang: "1"
           - name: archlinux-rolling
             image: archlinux:latest
-            install: "pacman -Syu --noconfirm --needed python python-setuptools python-wheel python-build gcc clang make"
+            install: "pacman --disable-sandbox -Syu --noconfirm --needed python python-setuptools python-wheel python-build gcc clang make"
             cflags: "-O2"
             test_clang: "1"
     steps:
@@ -338,73 +839,150 @@ jobs:
 
       - name: Run build and offline test suite in ${{ matrix.image }}
         shell: bash
+        env:
+          TARGET_IMAGE: ${{ matrix.image }}
+          INSTALL_CMD: ${{ matrix.install }}
+          EXTRA_CFLAGS: ${{ matrix.cflags }}
+          TEST_CLANG: ${{ matrix.test_clang }}
         run: |
           set -euo pipefail
           LOG_DIR="${RUNNER_TEMP}/emulation-logs"
           mkdir -p "${LOG_DIR}"
 
-          docker run --rm \
+          docker run -i --rm \
             -v "${GITHUB_WORKSPACE}:/repo:ro" \
             -v "${LOG_DIR}:/logs:rw" \
-            -e "INSTALL_CMD=${{ matrix.install }}" \
-            -e "EXTRA_CFLAGS=${{ matrix.cflags }}" \
-            -e "TEST_CLANG=${{ matrix.test_clang }}" \
-            "${{ matrix.image }}" sh -eu -c '
-              trap "chmod -R a+rX /logs 2>/dev/null || true" EXIT
+            -e INSTALL_CMD="${INSTALL_CMD}" \
+            -e EXTRA_CFLAGS="${EXTRA_CFLAGS}" \
+            -e TEST_CLANG="${TEST_CLANG}" \
+            "${TARGET_IMAGE}" sh -eu <<'EOF'
+          trap 'chmod -R a+rX /logs 2>/dev/null || true' EXIT
 
-              run_logged() {
-                _name="$1"; shift
-                _out="/logs/${_name}.stdout.log"
-                _err="/logs/${_name}.stderr.log"
-                _rc=0
-                printf "::group::[RUN] %s: %s\n" "${_name}" "$*"
-                "$@" >"${_out}" 2>"${_err}" || _rc=$?
-                printf "%s\n" "${_rc}" > "/logs/${_name}.rc"
-                printf "%s\n" "--- stdout (${_name}.stdout.log) ---"
+          run_logged() {
+            _name="$1"; shift
+            _out="/logs/${_name}.stdout.log"
+            _err="/logs/${_name}.stderr.log"
+            _rc=0
+            printf '%s\n' "$*" > "/logs/${_name}.cmd"
+            printf '0\n' > "/logs/${_name}.expected_rc"
+            "$@" >"${_out}" 2>"${_err}" || _rc=$?
+            printf '%s\n' "${_rc}" > "/logs/${_name}.rc"
+
+            if [ "${_rc}" -eq 0 ]; then
+              printf '::group::[PASS] %s (rc=0): %s\n' "${_name}" "$*"
+              if [ -s "${_out}" ]; then
+                printf '%s\n' "--- stdout (${_name}.stdout.log) ---"
                 cat "${_out}"
-                if [ -s "${_err}" ]; then
-                  printf "%s\n" "--- stderr (${_name}.stderr.log) ---"
-                  cat "${_err}"
-                fi
-                printf "%s\n::endgroup::\n" "--- exit_code=${_rc} ---"
-                return "${_rc}"
-              }
-
-              sh -eu -c "${INSTALL_CMD}"
-              cp -a /repo /tmp/work
-              cd /tmp/work
-              rm -rf build dist ./*.egg-info
-
-              run_logged "01_gcc_version" gcc --version
-              run_logged "02_build_gcc" env CFLAGS="${EXTRA_CFLAGS}" make build CC=gcc
-              run_logged "03_unittest_gcc" python3 -m unittest discover -s tests -v
-
-              if [ "${TEST_CLANG}" = "1" ]; then
-                make clean || true
-                run_logged "04_clang_version" clang --version
-                run_logged "05_build_clang" env CFLAGS="${EXTRA_CFLAGS}" make build CC=clang
-                run_logged "06_unittest_clang" python3 -m unittest discover -s tests -v
+              else
+                printf '%s\n' "--- stdout: (empty) ---"
               fi
+              if [ -s "${_err}" ]; then
+                printf '%s\n' "--- stderr (${_name}.stderr.log) ---"
+                cat "${_err}"
+              fi
+              printf '%s\n::endgroup::\n' "--- exit_code=0 ---"
+              return 0
+            fi
 
-              run_logged "07_wheel_offline" python3 -m build --wheel --no-isolation --outdir /tmp/dist .
-            '
+            printf '::error title=%s failed (rc=%s)::Command failed: %s\n' "${_name}" "${_rc}" "$*"
+            printf '%s\n' "================================================================"
+            printf '[FAIL] %s\n' "${_name}"
+            printf 'Command : %s\n' "$*"
+            printf 'Exit    : %s (expected 0)\n' "${_rc}"
+            printf '%s\n' "--- stdout (${_name}.stdout.log) ---"
+            if [ -s "${_out}" ]; then cat "${_out}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "--- stderr (${_name}.stderr.log) ---"
+            if [ -s "${_err}" ]; then cat "${_err}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "================================================================"
+            return "${_rc}"
+          }
+
+          run_logged "00_install_deps" sh -eu -c "${INSTALL_CMD}"
+
+          cp -a /repo /tmp/work
+          cd /tmp/work
+          rm -rf build dist ./*.egg-info
+
+          run_logged "01_gcc_version" gcc --version
+          run_logged "02_build_gcc" env CFLAGS="${EXTRA_CFLAGS}" make build CC=gcc
+          run_logged "03_unittest_gcc" python3 -m unittest discover -s tests -v
+
+          if [ "${TEST_CLANG}" = "1" ]; then
+            make clean || true
+            run_logged "04_clang_version" clang --version
+            run_logged "05_build_clang" env CFLAGS="${EXTRA_CFLAGS}" make build CC=clang
+            run_logged "06_unittest_clang" python3 -m unittest discover -s tests -v
+          fi
+
+          make clean || true
+          run_logged "07_wheel_offline" python3 -m build --wheel --no-isolation --outdir /tmp/dist .
+          run_logged "08_verify_wheel" python3 -c '
+          import glob, zipfile
+          wheels = glob.glob("/tmp/dist/cross_cpu-*.whl")
+          assert len(wheels) == 1, f"Expected 1 wheel, found: {wheels}"
+          with zipfile.ZipFile(wheels[0]) as zf:
+              names = zf.namelist()
+          assert any("cross_cpu/_native" in n and n.endswith(".so") for n in names), names
+          print("OK wheel:", wheels[0], "entries:", len(names))
+          '
+          EOF
 
       - name: Write job summary
         if: always()
         shell: bash
         run: |
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
           {
             echo "### Distro / Libc / Compiler Logs (${{ matrix.name }})"
-            echo "| Command | Exit Code | Stdout (bytes) | Stderr (bytes) |"
-            echo "|---|---:|---:|---:|"
+            echo "| Status | Command | Exit (Expected) | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---|---|---:|---:|"
             shopt -s nullglob
-            for rc_file in "${RUNNER_TEMP}/emulation-logs"/*.rc; do
+            failures=()
+            rc_files=("${LOG_DIR}"/*.rc)
+            if [[ "${#rc_files[@]}" -eq 0 ]]; then
+              echo "| FAIL | _(no command logs recorded)_ | - | 0 | 0 |"
+            fi
+            for rc_file in "${rc_files[@]}"; do
               name="$(basename "${rc_file}" .rc)"
               rc="$(cat "${rc_file}")"
-              out_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              err_b="$(wc -c < "${RUNNER_TEMP}/emulation-logs/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
-              echo "| \`${name}\` | \`${rc}\` | ${out_b} | ${err_b} |"
+              exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+              out_b="$(wc -c < "${LOG_DIR}/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${LOG_DIR}/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              if [[ -n "${rc}" && "${rc}" == "${exp}" ]]; then
+                status="PASS"
+              else
+                status="FAIL"
+                failures+=("${name}")
+              fi
+              echo "| ${status} | \`${name}\` | \`${rc}\` (exp \`${exp}\`) | ${out_b} | ${err_b} |"
             done
+
+            if [[ "${#failures[@]}" -gt 0 ]]; then
+              echo ""
+              echo "#### Failure Details"
+              for name in "${failures[@]}"; do
+                rc="$(cat "${LOG_DIR}/${name}.rc")"
+                exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+                cmd="$(cat "${LOG_DIR}/${name}.cmd" 2>/dev/null || echo '(unknown)')"
+                echo ""
+                echo "**\`${name}\`** — exit \`${rc}\` (expected \`${exp}\`)"
+                echo '```text'
+                echo "Command: ${cmd}"
+                echo "--- stdout (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stdout.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stdout.log"
+                else
+                  echo "(empty)"
+                fi
+                echo "--- stderr (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stderr.log"
+                else
+                  echo "(empty)"
+                fi
+                echo '```'
+              done
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload command logs
@@ -419,18 +997,77 @@ jobs:
   adversarial-container-constraints:
     name: Adversarial Constraints (Offline, Read-Only, Non-Root, Non-Contiguous CPU Set)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Pre-build wheel on host
+      - name: Pre-build ABI-matched wheel inside python:3.12-slim builder container
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet setuptools wheel build
-          python3 -m build --wheel --no-isolation --outdir "${RUNNER_TEMP}/wheels" .
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          WHEEL_DIR="${RUNNER_TEMP}/wheels"
+          mkdir -p "${LOG_DIR}" "${WHEEL_DIR}"
 
-      - name: Run offline, read-only, non-root, non-contiguous cpuset test with logging
+          # Build inside matching python:3.12-slim so Python ABI and glibc match the runtime container
+          # and host PEP 668 externally-managed-environment restrictions are never triggered.
+          docker run -i --rm \
+            -v "${GITHUB_WORKSPACE}:/repo:ro" \
+            -v "${WHEEL_DIR}:/wheels:rw" \
+            -v "${LOG_DIR}:/logs:rw" \
+            python:3.12-slim bash -euo pipefail <<'EOF'
+          trap 'chmod -R a+rX /wheels /logs 2>/dev/null || true' EXIT
+
+          run_logged() {
+            local name="$1"; shift
+            local out="/logs/${name}.stdout.log"
+            local err="/logs/${name}.stderr.log"
+            local rc=0
+            printf '%s\n' "$*" > "/logs/${name}.cmd"
+            printf '0\n' > "/logs/${name}.expected_rc"
+            "$@" >"${out}" 2>"${err}" || rc=$?
+            printf '%s\n' "${rc}" > "/logs/${name}.rc"
+
+            if [[ "${rc}" -eq 0 ]]; then
+              printf '::group::[PASS] %s (rc=0): %s\n' "${name}" "$*"
+              if [[ -s "${out}" ]]; then
+                printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+                cat "${out}"
+              fi
+              if [[ -s "${err}" ]]; then
+                printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+                cat "${err}"
+              fi
+              printf '%s\n::endgroup::\n' "--- exit_code=0 ---"
+              return 0
+            fi
+
+            printf '::error title=%s failed (rc=%s)::Command failed: %s\n' "${name}" "${rc}" "$*"
+            printf '%s\n' "================================================================"
+            printf '[FAIL] %s\n' "${name}"
+            printf 'Command : %s\n' "$*"
+            printf 'Exit    : %s (expected 0)\n' "${rc}"
+            printf '%s\n' "--- stdout (${name}.stdout.log) ---"
+            if [[ -s "${out}" ]]; then cat "${out}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "--- stderr (${name}.stderr.log) ---"
+            if [[ -s "${err}" ]]; then cat "${err}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "================================================================"
+            return "${rc}"
+          }
+
+          export DEBIAN_FRONTEND=noninteractive
+          run_logged "00_builder_apt" bash -euo pipefail -c \
+            'apt-get update -qq && apt-get install -y --no-install-recommends gcc libc6-dev'
+          run_logged "01_builder_pip_tools" python3 -m pip install --quiet --no-cache-dir setuptools wheel build
+
+          cp -a /repo /tmp/work
+          cd /tmp/work
+          rm -rf build dist ./*.egg-info
+          run_logged "02_builder_wheel" python3 -m build --wheel --no-isolation --outdir /wheels .
+          EOF
+
+      - name: Run offline, read-only, non-root, non-contiguous cpuset test with deterministic logging
         shell: bash
         run: |
           set -euo pipefail
@@ -447,54 +1084,185 @@ jobs:
           fi
           echo "Using cpuset=${CPUSET} (host nproc=${CORES})"
 
+          OUT_LOG="${LOG_DIR}/03_adversarial_container.stdout.log"
+          ERR_LOG="${LOG_DIR}/03_adversarial_container.stderr.log"
+          printf '%s\n' "docker run --network=none --read-only --user=65534:65534 --cpuset-cpus=${CPUSET} python:3.12-slim" \
+            > "${LOG_DIR}/03_adversarial_container.cmd"
+          printf '0\n' > "${LOG_DIR}/03_adversarial_container.expected_rc"
+
           # Container stays strictly --read-only with zero writable bind mounts;
-          # host-side capture records stdout/stderr while inner commands print per-step logs.
+          # host redirects stdout/stderr deterministically to files (no async >(tee) race).
           rc=0
-          docker run --rm \
+          docker run -i --rm \
             --network=none \
             --read-only \
-            --tmpfs /tmp:rw,exec,size=256m \
+            --tmpfs /tmp:rw,exec,mode=1777,size=256m \
             --user 65534:65534 \
             --cpuset-cpus="${CPUSET}" \
             -e HOME=/tmp \
             -e XDG_CACHE_HOME=/tmp/cache \
+            -e TMPDIR=/tmp \
+            -e PIP_NO_CACHE_DIR=1 \
+            -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+            -e CPUSET="${CPUSET}" \
             -v "${RUNNER_TEMP}/wheels:/wheels:ro" \
-            python:3.12-slim bash -euo pipefail -c '
-              run_inner() {
-                local name="$1"; shift
-                local out="/tmp/${name}.stdout.log"
-                local err="/tmp/${name}.stderr.log"
-                local irc=0
-                printf "::group::[RUN] %s: %s\n" "${name}" "$*"
-                "$@" >"${out}" 2>"${err}" || irc=$?
-                printf "%s\n" "--- stdout (${name}) ---"
+            python:3.12-slim bash -euo pipefail >"${OUT_LOG}" 2>"${ERR_LOG}" <<'EOF' || rc=$?
+          run_inner() {
+            local name="$1"; shift
+            local out="/tmp/${name}.stdout.log"
+            local err="/tmp/${name}.stderr.log"
+            local irc=0
+            "$@" >"${out}" 2>"${err}" || irc=$?
+            if [[ "${irc}" -eq 0 ]]; then
+              printf '::group::[PASS] %s (rc=0): %s\n' "${name}" "$*"
+              if [[ -s "${out}" ]]; then
+                printf '%s\n' "--- stdout (${name}) ---"
                 cat "${out}"
-                if [[ -s "${err}" ]]; then
-                  printf "%s\n" "--- stderr (${name}) ---"
-                  cat "${err}"
-                fi
-                printf "%s\n::endgroup::\n" "--- exit_code=${irc} ---"
-                return "${irc}"
-              }
+              fi
+              if [[ -s "${err}" ]]; then
+                printf '%s\n' "--- stderr (${name}) ---"
+                cat "${err}"
+              fi
+              printf '%s\n::endgroup::\n' "--- exit_code=0 ---"
+              return 0
+            fi
 
-              run_inner "01_venv_create" python3 -m venv /tmp/venv
-              run_inner "02_pip_install_offline" /tmp/venv/bin/pip install --no-index --no-deps /wheels/*.whl
-              cd /tmp
-              run_inner "03_version" /tmp/venv/bin/cross-cpu --version
-              run_inner "04_list" /tmp/venv/bin/cross-cpu list --json -v
-              run_inner "04_list_json_check" python3 -m json.tool /tmp/04_list.stdout.log
-              run_inner "05_info" /tmp/venv/bin/cross-cpu info --json -v
-              run_inner "05_info_json_check" python3 -m json.tool /tmp/05_info.stdout.log
-              run_inner "06_run" /tmp/venv/bin/cross-cpu run \
-                --cores all \
-                --test compute-fp32,compute-int64,cache-l1,memory-pattern,coherency-atomic \
-                --duration 150ms --json -v
-              run_inner "06_run_json_check" python3 -m json.tool /tmp/06_run.stdout.log
-            ' > >(tee "${LOG_DIR}/adversarial_container.stdout.log") \
-              2> >(tee "${LOG_DIR}/adversarial_container.stderr.log" >&2) || rc=$?
+            printf '::error title=adversarial/%s failed (rc=%s)::Command failed: %s\n' "${name}" "${irc}" "$*"
+            printf '%s\n' "================================================================"
+            printf '[FAIL] %s\n' "${name}"
+            printf 'Command : %s\n' "$*"
+            printf 'Exit    : %s (expected 0)\n' "${irc}"
+            printf '%s\n' "--- stdout (${name}) ---"
+            if [[ -s "${out}" ]]; then cat "${out}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "--- stderr (${name}) ---"
+            if [[ -s "${err}" ]]; then cat "${err}"; else printf '%s\n' "(empty)"; fi
+            printf '%s\n' "================================================================"
+            return "${irc}"
+          }
 
-          printf '%s\n' "${rc}" > "${LOG_DIR}/adversarial_container.rc"
+          assert_empty_stderr() {
+            local name="$1"
+            if [[ -s "/tmp/${name}.stderr.log" ]]; then
+              printf '::error title=adversarial/%s polluted stderr::Expected empty stderr in --json mode\n' "${name}"
+              cat "/tmp/${name}.stderr.log" >&2
+              return 1
+            fi
+          }
+
+          run_inner "01_venv_create" python3 -m venv /tmp/venv
+          run_inner "02_pip_install_offline" /tmp/venv/bin/pip install --no-index --no-deps /wheels/*.whl
+          cd /tmp
+
+          run_inner "03_version" /tmp/venv/bin/cross-cpu --version
+          run_inner "04_info_verbose" /tmp/venv/bin/cross-cpu info -v
+
+          run_inner "05_list_json" /tmp/venv/bin/cross-cpu list --json
+          assert_empty_stderr "05_list_json"
+          run_inner "05_list_json_check" python3 -m json.tool /tmp/05_list_json.stdout.log
+
+          run_inner "06_info_json" /tmp/venv/bin/cross-cpu info --json
+          assert_empty_stderr "06_info_json"
+          run_inner "06_info_json_check" python3 -m json.tool /tmp/06_info_json.stdout.log
+
+          run_inner "07_run_cpuset_json" /tmp/venv/bin/cross-cpu run \
+            --cores "${CPUSET}" \
+            --test compute-fp32,compute-int64,cache-l1,memory-pattern,coherency-atomic \
+            --duration 150ms --json
+          assert_empty_stderr "07_run_cpuset_json"
+          run_inner "07_run_cpuset_assert" python3 -c '
+          import json, os, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          expected_ids = sorted(int(x) for x in os.environ["CPUSET"].split(","))
+          assert data["config"]["selected_core_ids"] == expected_ids, data["config"]
+          assert data["summary"]["exit_code"] == 0, data["summary"]
+          assert data["summary"]["passed"] == 5, data["summary"]
+          assert data["summary"]["failed"] == 0, data["summary"]
+          print("OK cpuset run:", expected_ids, data["summary"])
+          ' /tmp/07_run_cpuset_json.stdout.log
+
+          run_inner "08_run_all_json" /tmp/venv/bin/cross-cpu run \
+            --cores all \
+            --test compute-fp32,compute-int64,cache-l1,memory-pattern,coherency-atomic \
+            --duration 150ms --json
+          assert_empty_stderr "08_run_all_json"
+          run_inner "08_run_all_assert" python3 -c '
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data["summary"]["exit_code"] == 0, data["summary"]
+          assert data["summary"]["passed"] == 5, data["summary"]
+          assert data["summary"]["failed"] == 0, data["summary"]
+          print("OK --cores all run:", data["summary"])
+          ' /tmp/08_run_all_json.stdout.log
+          EOF
+
+          printf '%s\n' "${rc}" > "${LOG_DIR}/03_adversarial_container.rc"
+          cat "${OUT_LOG}"
+          if [[ -s "${ERR_LOG}" ]]; then
+            printf '%s\n' "--- docker stderr ---" >&2
+            cat "${ERR_LOG}" >&2
+          fi
+          if [[ "${rc}" -ne 0 ]]; then
+            printf '::error title=03_adversarial_container failed (rc=%s)::Adversarial container exited %s\n' "${rc}" "${rc}"
+          fi
           exit "${rc}"
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          LOG_DIR="${RUNNER_TEMP}/emulation-logs"
+          {
+            echo "### Adversarial Container Logs (Offline / Read-Only / Non-Root / Non-Contiguous CPU Set)"
+            echo "| Status | Command | Exit (Expected) | Stdout (bytes) | Stderr (bytes) |"
+            echo "|---|---|---|---:|---:|"
+            shopt -s nullglob
+            failures=()
+            rc_files=("${LOG_DIR}"/*.rc)
+            if [[ "${#rc_files[@]}" -eq 0 ]]; then
+              echo "| FAIL | _(no command logs recorded)_ | - | 0 | 0 |"
+            fi
+            for rc_file in "${rc_files[@]}"; do
+              name="$(basename "${rc_file}" .rc)"
+              rc="$(cat "${rc_file}")"
+              exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+              out_b="$(wc -c < "${LOG_DIR}/${name}.stdout.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              err_b="$(wc -c < "${LOG_DIR}/${name}.stderr.log" 2>/dev/null | tr -d ' ' || echo 0)"
+              if [[ -n "${rc}" && "${rc}" == "${exp}" ]]; then
+                status="PASS"
+              else
+                status="FAIL"
+                failures+=("${name}")
+              fi
+              echo "| ${status} | \`${name}\` | \`${rc}\` (exp \`${exp}\`) | ${out_b} | ${err_b} |"
+            done
+
+            if [[ "${#failures[@]}" -gt 0 ]]; then
+              echo ""
+              echo "#### Failure Details"
+              for name in "${failures[@]}"; do
+                rc="$(cat "${LOG_DIR}/${name}.rc")"
+                exp="$(cat "${LOG_DIR}/${name}.expected_rc" 2>/dev/null || echo 0)"
+                cmd="$(cat "${LOG_DIR}/${name}.cmd" 2>/dev/null || echo '(unknown)')"
+                echo ""
+                echo "**\`${name}\`** — exit \`${rc}\` (expected \`${exp}\`)"
+                echo '```text'
+                echo "Command: ${cmd}"
+                echo "--- stdout (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stdout.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stdout.log"
+                else
+                  echo "(empty)"
+                fi
+                echo "--- stderr (tail -n 200) ---"
+                if [[ -s "${LOG_DIR}/${name}.stderr.log" ]]; then
+                  tail -n 200 "${LOG_DIR}/${name}.stderr.log"
+                else
+                  echo "(empty)"
+                fi
+                echo '```'
+              done
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload command logs
         if: always()
