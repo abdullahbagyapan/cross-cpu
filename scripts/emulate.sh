@@ -1369,6 +1369,10 @@ for target in "${SELECTED_TARGETS[@]}"; do
     RESULTS_STATUS+=("FAIL")
     RESULTS_DETAIL+=("exited $(decode_rc "${t_rc}") — see ${t_log_dir}/")
     ANY_FAILED="1"
+    if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+      printf '::error title=%s failed (rc=%s)::Target %s exited %s (see job summary and uploaded logs)\n' \
+        "${target}" "$(decode_rc "${t_rc}")" "${target}" "$(decode_rc "${t_rc}")"
+    fi
     printf '<== %s: %s (rc=%s, %ss)\n\n' "${target}" "$(c_red FAIL)" "$(decode_rc "${t_rc}")" "${t_elapsed}"
     if [[ "${FAIL_FAST}" == "1" ]]; then
       break
