@@ -145,7 +145,7 @@ jobs:
           import json, sys
           data = json.load(open(sys.argv[1], encoding="utf-8"))
           assert data["command"] == "info", data
-          assert data["native"]["arch"] == "x86_64", data["native"]
+          assert data["native"]["arch_name"] == "x86_64", data["native"]
           assert data["native"]["endianness"] == "little", data["native"]
           print("OK info:", data["native"]["probe_summary"])
           ' "${LOG_DIR}/02_${slug}_info_json.stdout.log"
@@ -417,7 +417,7 @@ jobs:
           import json, sys
           data = json.load(open(sys.argv[1], encoding="utf-8"))
           assert data["command"] == "info", data
-          assert data["native"]["arch"] == "arm64", data["native"]
+          assert data["native"]["arch_name"] == "arm64", data["native"]
           assert data["native"]["endianness"] == "little", data["native"]
           print("OK info:", data["native"]["probe_summary"])
           ' "${LOG_DIR}/02_${slug}_info_json.stdout.log"
@@ -714,9 +714,9 @@ jobs:
           import json, os, sys
           data = json.load(open(sys.argv[1], encoding="utf-8"))
           assert data["command"] == "info", data
-          assert data["native"]["arch"] == os.environ["EXPECTED_ARCH"], data["native"]
+          assert data["native"]["arch_name"] == os.environ["EXPECTED_ARCH"], data["native"]
           assert data["native"]["endianness"] == os.environ["EXPECTED_ENDIAN"], data["native"]
-          print("OK info:", data["native"]["arch"], data["native"]["endianness"], data["native"]["probe_summary"])
+          print("OK info:", data["native"]["arch_name"], data["native"]["endianness"], data["native"]["probe_summary"])
           ' /logs/07_info_json.stdout.log
 
           run_cli_json_expect 0 "08_run_json" python3 -m src run \
