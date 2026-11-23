@@ -35,7 +35,13 @@ make install DESTDIR=/tmp/cross-cpu-stage PREFIX=/usr
 
 # 3. Verify offline wheel and sdist packaging
 python3 setup.py sdist --dist-dir /tmp/cross-cpu-dist
+
+# 4. (Optional, Docker-only) Multi-arch & per-ISA emulation verification
+./scripts/emulate.sh --suite arch
+./scripts/emulate.sh --suite isa
 ```
+
+See [Testing & Multi-Architecture Emulation](emulation.md) for the full Docker emulation matrix, Colima setup, and GitHub Actions CI details.
 
 ## Conventional Commits
 

@@ -42,6 +42,7 @@ make test
 - [ISA Backends (`x86_64`, `ARM64`, and `Other Architectures`)](docs/isa_backends.md)
 - [Workloads, Fixed Units & SDC Verification](docs/workloads.md)
 - [Packaging, Distro Builds & FHS Installation](docs/packaging.md)
+- [Testing & Multi-Architecture Emulation](docs/emulation.md)
 - [Contributing Guide](docs/contributing.md)
 - [Unix `man(1)` Page (`cross-cpu.1`)](docs/cross-cpu.1)
 
