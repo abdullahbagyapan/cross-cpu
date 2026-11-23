@@ -330,7 +330,7 @@ __attribute__((target("clflushopt")))
 static void flush_with_clflushopt(const uint8_t *p, size_t len, size_t step) {
     _mm_mfence();
     for (size_t off = 0; off < len; off += step) {
-        _mm_clflushopt(p + off);
+        _mm_clflushopt((void *)(p + off));
     }
     _mm_mfence();
 }
