@@ -5,6 +5,15 @@ All notable changes to `CrossCPU` (`cross-cpu`) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-11-23
+
+### Added
+- **Multi-Architecture Emulation CI Workflow (`.github/workflows/emulation.yml`):** Added GitHub Actions emulation matrix covering x86_64/ARM64 QEMU per-ISA gating, foreign architectures (`linux/arm64`, `linux/riscv64`, `linux/ppc64le`, big-endian `linux/s390x`), multi-distro libc/compiler validation (Alpine musl, Debian Trixie hardened, Fedora, Arch Linux with GCC + Clang + offline wheels), and adversarial locked-down containers (offline, read-only, non-root UID 65534, non-contiguous cpuset).
+- **Docker-Only Local Emulation Test Harness (`scripts/emulate.sh`):** Added zero-host-assumption, testing-only Docker script targeting all 6 `native/arch/*` backends (`amd64`, `arm64`, `riscv64`, `ppc64le`, big-endian `s390x`, and `generic`), QEMU per-ISA gating, distros, and adversarial containers with Rosetta-safe `binfmt_misc` probing and structured per-step logs + Markdown summaries.
+
+### Fixed
+- **CI Emulation Diagnostics & Compatibility:** Fixed CLI module entry point (`python3 -m src`), separated verbose `-v` probe traces from strict `--json` checks (with automatic `-v` diagnostic retries on silent `--json` failures), added uncollapsed `::error::` annotations + failure details in `$GITHUB_STEP_SUMMARY`, corrected `native.arch_name` JSON assertions, added `redhat-rpm-config` on Fedora and `--disable-sandbox` on Arch Linux, and moved adversarial wheel pre-builds into an ABI-matched `python:3.12-slim` container.
+
 ## [0.1.1] - 2026-11-22
 
 ### Fixed
