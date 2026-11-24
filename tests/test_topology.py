@@ -167,6 +167,26 @@ class TestMacOSTopologyDiscovery(unittest.TestCase):
         self.assertEqual(e_ids, [6, 7, 8, 9])
         self.assertEqual(e_qos, 2)
 
+    def test_mocked_macos_perflevel1_l3_fallback(self) -> None:
+        mock_sysctl = {
+            "machdep.cpu.brand_string": "Apple Silicon L3 Test",
+            "hw.logicalcpu": 8,
+            "hw.physicalcpu": 8,
+            "hw.nperflevels": 2,
+            "hw.perflevel0.logicalcpu": 4,
+            "hw.perflevel1.logicalcpu": 4,
+            "hw.perflevel0.l1icachesize": 196608,
+            "hw.perflevel0.l1dcachesize": 131072,
+            "hw.perflevel0.l2cachesize": 16 * 1024 * 1024,
+            "hw.perflevel0.cpusperl2": 4,
+            "hw.perflevel1.l3cachesize": 24 * 1024 * 1024,
+            "hw.perflevel1.cpusperl3": 8,
+        }
+        topo = discover_macos_topology(mock_sysctl, machine="arm64")
+        self.assertEqual(topo.caches.l3_bytes, 24 * 1024 * 1024)
+        self.assertEqual(topo.caches.l3_shared_cpus, 8)
+        self.assertTrue(topo.caches.discovered)
+
     def test_live_host_topology(self) -> None:
         topo = discover_topology()
         self.assertGreaterEqual(topo.logical_cores, 1)

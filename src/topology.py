@@ -451,9 +451,9 @@ def discover_macos_topology(
     l1i = get_int("hw.perflevel0.l1icachesize") or get_int("hw.l1icachesize") or 0
     l1d = get_int("hw.perflevel0.l1dcachesize") or get_int("hw.l1dcachesize") or 0
     l2 = get_int("hw.perflevel0.l2cachesize") or get_int("hw.l2cachesize") or 0
-    l3 = get_int("hw.perflevel0.l3cachesize") or get_int("hw.l3cachesize") or 0
+    l3 = (get_int("hw.perflevel0.l3cachesize") or get_int("hw.perflevel1.l3cachesize") or get_int("hw.l3cachesize") or 0)
     cpus_per_l2 = get_int("hw.perflevel0.cpusperl2") or 1
-    cpus_per_l3 = get_int("hw.perflevel0.cpusperl3") or (logical_total if l3 > 0 else 1)
+    cpus_per_l3 = (get_int("hw.perflevel0.cpusperl3") or get_int("hw.perflevel1.cpusperl3") or (logical_total if l3 > 0 else 1))
 
     caches = CacheInfo(
         l1i_bytes=l1i,
