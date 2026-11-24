@@ -5,6 +5,17 @@ All notable changes to `CrossCPU` (`cross-cpu`) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3a2] - 2026-11-24
+
+### Added
+- **PyPI Installation & Absolute Doc Links:** Added `pip3 install cross-cpu` instructions to `README.md` and `docs/packaging.md`, and replaced relative Markdown documentation links with absolute GitHub URLs for clean PyPI rendering.
+- **Python 3.14 Classifier (`pyproject.toml`):** Added `Programming Language :: Python :: 3.14` to package classifiers.
+- **CFarm Automation Script (`scripts/`):** Added automation script for GCC Compile Farm (`cfarm`) validation.
+
+### Fixed
+- **macOS L3 Cache Discovery (`src/topology.py`):** Fall back to `hw.perflevel1.l3cachesize` and `hw.perflevel1.cpusperl3` when `hw.perflevel0` does not report L3 cache values.
+- **CLI Output Polish (`src/cli.py`):** Renamed `Hybrid Clusters` label to `Core Topology` in `cross-cpu info`.
+
 ## [0.1.3a1] - 2026-11-24
 
 ### Added
