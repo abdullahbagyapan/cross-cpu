@@ -5,6 +5,16 @@ All notable changes to `CrossCPU` (`cross-cpu`) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-11-24
+
+### Added
+- **Emulation and Multi-Architecture Testing Documentation (`docs/emulation.md`):** Added a dedicated reference guide covering the Docker-only test harness (`scripts/emulate.sh`), Colima and multi-architecture Docker setup on macOS hosts, QEMU per-ISA gating, adversarial sandboxing, and CI matrix replication.
+
+### Fixed
+- **Hermetic CI Emulation Runner (`.github/workflows/emulation.yml`):** Unified all emulation matrix jobs to execute within hermetic Debian containers via `scripts/emulate.sh`, eliminating host environment pollution and SIGILL traps on legacy QEMU CPU models (such as `qemu64`).
+- **Scalar Fallback Emulation Matrix:** Added `arch-generic` (pure scalar fallback backend) to CI emulation jobs.
+- **x86_64 Cache Flush Compiler Warning:** Explicitly cast pointer in `_mm_clflushopt` to void pointer (`native/arch/x86_64/probe_x86.c`) to eliminate discarded-qualifiers warnings under GCC/Clang.
+
 ## [0.1.2] - 2026-11-23
 
 ### Added
