@@ -71,7 +71,7 @@ When multiple workloads execute in a single invocation, `cross-cpu` aggregates a
 ```json
 {
   "command": "run",
-  "version": "0.1.3",
+  "version": "0.1.3a1",
   "host": {
     "os": "Linux",
     "machine": "x86_64",

@@ -5,6 +5,12 @@ All notable changes to `CrossCPU` (`cross-cpu`) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3a1] - 2026-11-24
+
+### Added
+- **PyPI Trusted Publishing (`.github/workflows/release.yml`):** Added automated `publish-pypi` job using GitHub OIDC trusted publishing (`pypa/gh-action-pypi-publish@release/v1`) with strict `twine check` validation for source distributions.
+- **Package Metadata (`pyproject.toml`):** Added explicit `readme = "README.md"` and project URLs (`Homepage`, `Repository`, `Issues`, and `"Hardware Matrix"`).
+
 ## [0.1.3] - 2026-11-24
 
 ### Added
