@@ -415,11 +415,11 @@ def _cmd_info(
     stdout.write(f"NUMA Nodes       : {', '.join(str(n) for n in topology.numa_nodes)}\n")
     if topology.is_hybrid:
         stdout.write(
-            f"Hybrid Clusters  : {len(topology.p_core_ids)} P-core(s), "
+            f"Core Topology    : {len(topology.p_core_ids)} P-core(s), "
             f"{len(topology.e_core_ids)} E-core(s)\n"
         )
     else:
-        stdout.write("Hybrid Clusters  : homogeneous\n")
+        stdout.write("Core Topology    : homogeneous\n")
     if topology.memory_bytes > 0:
         stdout.write(f"System Memory    : {_format_bytes(topology.memory_bytes)}\n")
     caches = topology.caches
