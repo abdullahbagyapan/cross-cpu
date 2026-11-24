@@ -2,6 +2,12 @@
 
 `CrossCPU` is structured for clean offline builds across Linux distributions (`.deb`, `.rpm`, Alpine `APKBUILD`, Arch `PKGBUILD`), macOS, and standard Python `pip` / wheel workflows.
 
+## Installing from PyPI
+
+```bash
+pip3 install cross-cpu
+```
+
 ## Flat `src/` to `cross_cpu` Package Mapping
 
 On disk, Python modules reside directly under `src/` and use **relative imports only**:

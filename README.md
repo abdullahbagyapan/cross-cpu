@@ -15,24 +15,37 @@ It combines a **zero-dependency Python 3.10+ standard-library CLI orchestrator**
 - **21 Deterministic SDC-Verified Workloads:** Integer (`GOP/s`), Floating-Point & ML (`GFLOP/s`), Matrix Engines (`GFLOP/s` / `GOP/s`), Hardware Crypto KATs (`GB/s`), Cache Tiers (`GB/s`), Main Memory (`GB/s`), and Multi-Core Atomic Coherency (`GOP/s`).
 - **Clean Single-Document JSON & Severity-Ordered Exit Codes (`0..4`):** Deterministic human tables or strict single-document `--json` output with clean `stdout`/`stderr` separation.
 
+## Installation
+
+Install directly from PyPI (requires Python 3.10+ and a C11 compiler):
+
+```bash
+pip3 install cross-cpu
+```
+
+Or build from source offline:
+
+```bash
+make build
+make test
+```
+
 ## Quick Start
 
 ```bash
-# Build native C11 shared library offline and run unit tests
-make build
-make test
-
 # Inspect host CPU topology, cache hierarchy, NUMA nodes, and ISA backends
-./cross-cpu info
+cross-cpu info
 
 # List all 21 canonical workloads and host ISA readiness
-./cross-cpu list
+cross-cpu list
 
 # Run targeted stress and SDC validation workloads
-./cross-cpu run --test compute-fp32,memory-pattern --duration 500ms
-./cross-cpu run --cores p-cores --isa auto --warmup 5s --duration 60s
-./cross-cpu run --test all --duration 10s --json
+cross-cpu run --test compute-fp32,memory-pattern --duration 500ms
+cross-cpu run --cores p-cores --isa auto --warmup 5s --duration 60s
+cross-cpu run --test all --duration 10s --json
 ```
+
+*(When running directly from a source checkout without installing, use `./cross-cpu` in place of `cross-cpu`.)*
 
 ## Documentation Suite
 
