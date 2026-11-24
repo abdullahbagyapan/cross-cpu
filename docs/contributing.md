@@ -41,7 +41,7 @@ python3 setup.py sdist --dist-dir /tmp/cross-cpu-dist
 ./scripts/emulate.sh --suite isa
 ```
 
-See [Testing & Multi-Architecture Emulation](emulation.md) for the full Docker emulation matrix, Colima setup, and GitHub Actions CI details.
+See [Testing & Multi-Architecture Emulation](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/emulation.md) for the full Docker emulation matrix, Colima setup, and GitHub Actions CI details.
 
 ## Conventional Commits
 

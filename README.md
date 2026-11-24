@@ -4,7 +4,7 @@
 
 It combines a **zero-dependency Python 3.10+ standard-library CLI orchestrator** with a **strictly architecture-isolated C11 + POSIX `pthreads` native shared library** loaded via `ctypes`.
 
-![Terminal Demo](./assets/demo.gif)
+![Terminal Demo](https://raw.githubusercontent.com/abdullahbagyapan/cross-cpu/main/assets/demo.gif)
 
 
 ## Highlights
@@ -36,16 +36,16 @@ make test
 
 ## Documentation Suite
 
-- [Documentation Index](docs/README.md)
-- [CLI Reference & Exit Codes](docs/cli.md)
-- [System Architecture & C11 ABI](docs/architecture.md)
-- [ISA Backends (`x86_64`, `ARM64`, and `Other Architectures`)](docs/isa_backends.md)
-- [Workloads, Fixed Units & SDC Verification](docs/workloads.md)
-- [Packaging, Distro Builds & FHS Installation](docs/packaging.md)
-- [Testing & Multi-Architecture Emulation](docs/emulation.md)
-- [Contributing Guide](docs/contributing.md)
-- [Unix `man(1)` Page (`cross-cpu.1`)](docs/cross-cpu.1)
+- [Documentation Index](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/README.md)
+- [CLI Reference & Exit Codes](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/cli.md)
+- [System Architecture & C11 ABI](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/architecture.md)
+- [ISA Backends (`x86_64`, `ARM64`, and `Other Architectures`)](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/isa_backends.md)
+- [Workloads, Fixed Units & SDC Verification](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/workloads.md)
+- [Packaging, Distro Builds & FHS Installation](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/packaging.md)
+- [Testing & Multi-Architecture Emulation](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/emulation.md)
+- [Contributing Guide](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/contributing.md)
+- [Unix `man(1)` Page (`cross-cpu.1`)](https://github.com/abdullahbagyapan/cross-cpu/blob/main/docs/cross-cpu.1)
 
 ## License
 
-MIT License. Copyright (c) 2026 CrossCPU Contributors. See [LICENSE](LICENSE).
+MIT License. Copyright (c) 2026 CrossCPU Contributors. See [LICENSE](https://github.com/abdullahbagyapan/cross-cpu/blob/main/LICENSE).

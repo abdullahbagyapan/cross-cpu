@@ -137,7 +137,7 @@ colima stop
 
 ## 4. GitHub Actions Emulation Workflow (`.github/workflows/emulation.yml`)
 
-GitHub Actions runs the exact same [`scripts/emulate.sh`](../scripts/emulate.sh) targets (single source of truth) on:
+GitHub Actions runs the exact same [`scripts/emulate.sh`](https://github.com/abdullahbagyapan/cross-cpu/blob/main/scripts/emulate.sh) targets (single source of truth) on:
 - Manual dispatch (`workflow_dispatch`)
 - Weekly schedule (`Sunday 04:00 UTC`)
 - Release tags (`v*.*.*`)
