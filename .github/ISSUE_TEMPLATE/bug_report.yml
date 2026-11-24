@@ -19,8 +19,23 @@ body:
       options:
         - Linux (glibc)
         - Linux (musl / Alpine)
+        - Linux (WSL2)
         - macOS (Apple Silicon / arm64)
         - macOS (Intel / x86_64)
+        - Other POSIX (FreeBSD, OpenBSD, etc.)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: exec_env
+    attributes:
+      label: Execution Environment
+      description: Critical for diagnosing SIGILL, XSAVE/XCR0 masking, and topology detection.
+      options:
+        - Bare metal
+        - Container (Docker / Podman / LXC)
+        - VM / Hypervisor (KVM, VMware, Hyper-V, Cloud VM)
+        - Emulation / Translation (QEMU, Rosetta 2)
     validations:
       required: true
 
@@ -55,6 +70,7 @@ body:
         - vsx
         - vx
         - scalar
+        - "N/A (build / install / info failure)"
     validations:
       required: true
 
@@ -63,10 +79,11 @@ body:
     attributes:
       label: Installation Method
       options:
-        - PyPI prebuilt wheel
+        - PyPI prebuilt wheel (pip / uvx / pipx)
+        - Git clone / local source checkout
+        - Built from source / sdist (make build or pip install --no-binary)
         - Distro package (Debian / Ubuntu / Fedora / Arch / Nix)
         - Homebrew
-        - Built from source / sdist (make build or pip install --no-binary)
     validations:
       required: true
 
@@ -75,6 +92,7 @@ body:
     attributes:
       label: Observed Exit Code / Termination
       options:
+        - "Build / compilation / install failure"
         - "0 (SUCCESS — unexpected result)"
         - "1 (USAGE_ERROR)"
         - "2 (INIT_ERROR)"
@@ -88,11 +106,12 @@ body:
   - type: textarea
     id: environment
     attributes:
-      label: Version, OS, Kernel & Compiler Details
-      description: Paste `cross-cpu --version`, `uname -a`, Python version, and `cc --version` (required for build/sdist issues). Note if running inside a VM or container.
+      label: Version, CPU Model, Kernel & Compiler Details
+      description: Paste `cross-cpu --version` (or git commit SHA), CPU model, `uname -a`, Python version, and `cc --version`. If reporting an ISA mismatch or startup crash, also include `lscpu` (Linux) or `sysctl -a | grep -E 'machdep.cpu|hw.optional'` (macOS).
       render: shell
       placeholder: |
-        cross-cpu 1.0.0
+        cross-cpu 0.1.2
+        CPU: AMD Ryzen 9 7950X / Apple M3 Pro / etc.
         Python 3.12.7
         Linux host 6.11.0 #1 SMP aarch64 GNU/Linux
         gcc (GCC) 14.2.1
@@ -102,17 +121,17 @@ body:
   - type: textarea
     id: info_json
     attributes:
-      label: Output of `cross-cpu info --json`
-      description: Run `cross-cpu info --json` and paste the complete JSON output (topology, cache sizes, detected ISA capabilities).
+      label: Output of `cross-cpu info --json` (if runnable)
+      description: Run `cross-cpu info --json` and paste the complete JSON output. Leave blank if the failure occurs during build, install, or startup.
       render: json
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: repro_verbose
     attributes:
-      label: Failing Command & Verbose (`-v`) Output
-      description: Paste the exact command run with `-v` (including CPUID/HWCAP/sysctl probe traces, selected ISA, core affinity, and build logs if applicable).
+      label: Failing Command, Verbose (`-v`) Output & Logs
+      description: Paste the exact command run with `-v` (probe traces, selected ISA, core affinity) or full compiler error logs. For `SIGILL` crashes, a 1-line debugger trace (`gdb -batch -ex run -ex 'x/i $pc' -ex bt --args ...`) is appreciated if available.
       render: shell
       placeholder: |
         $ cross-cpu run --cores physical --test compute-fp32 --duration 500ms -v

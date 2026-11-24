@@ -1,0 +1,155 @@
+name: Hardware Validation Report
+description: Submit a bare-metal (or VM/container) alpha test result to populate the CrossCPU Tested Hardware Matrix
+title: "[hw-report]: "
+labels: ["hardware-report", "alpha-testing"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing **CrossCPU** on real hardware. Please run the commands below and paste the outputs so we can verify ISA dispatch, topology detection, and kernel results before `v1.0.0`.
+
+        ```sh
+        cross-cpu --version && uname -a && python3 --version
+        cross-cpu info --json
+        cross-cpu run --duration 100ms -v
+        ```
+
+        If you hit a crash, `SIGILL`, or build failure, please use the **Bug Report** template instead.
+
+  - type: input
+    id: cpu_model
+    attributes:
+      label: CPU Model & Socket Configuration
+      description: Exact processor model (and socket count if multi-socket).
+      placeholder: "e.g., AMD Ryzen 9 7950X (1S) / Dual Intel Xeon Platinum 8480+ (2S) / Apple M3 Pro"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Overall Result
+      options:
+        - "PASS — ISA detection, topology, and verification succeeded"
+        - "PARTIAL — Passed tests, but topology/cache/ISA metadata looks inaccurate"
+        - "UNEXPECTED — Non-crashing mismatch or warning (see notes)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Linux (glibc)
+        - Linux (musl / Alpine)
+        - Linux (WSL2)
+        - macOS (Apple Silicon / arm64)
+        - macOS (Intel / x86_64)
+        - Other POSIX (FreeBSD, OpenBSD, etc.)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: exec_env
+    attributes:
+      label: Execution Environment
+      options:
+        - Bare metal
+        - Container (Docker / Podman / LXC)
+        - VM / Hypervisor (KVM, VMware, Hyper-V, Cloud VM)
+        - Emulation / Translation (QEMU, Rosetta 2)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: CPU Architecture
+      options:
+        - x86_64
+        - arm64 / aarch64
+        - riscv64
+        - ppc64le / ppc64
+        - s390x
+        - Other POSIX CPU
+    validations:
+      required: true
+
+  - type: dropdown
+    id: isa_exercised
+    attributes:
+      label: Highest ISA Exercised
+      description: Select the highest ISA backend actually dispatched during your test run.
+      options:
+        - auto
+        - amx
+        - avx512
+        - avx2
+        - sse4
+        - sme
+        - sve
+        - neon
+        - rvv
+        - vsx
+        - vx
+        - scalar
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Method
+      options:
+        - PyPI prebuilt wheel (pip / uvx / pipx)
+        - Git clone / local source checkout
+        - Built from source / sdist (make build or pip install --no-binary)
+        - Distro package (Debian / Ubuntu / Fedora / Arch / Nix)
+        - Homebrew
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version, Kernel & Toolchain
+      description: Paste `cross-cpu --version`, `uname -a`, Python version, and `cc --version` (if built from source).
+      render: shell
+      placeholder: |
+        cross-cpu 0.1.3
+        Linux host 6.11.0 #1 SMP x86_64 GNU/Linux
+        Python 3.12.7
+        gcc (GCC) 14.2.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: info_json
+    attributes:
+      label: Output of `cross-cpu info --json`
+      description: Complete JSON output showing detected topology, cache hierarchy, and ISA capabilities.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: run_output
+    attributes:
+      label: Test Command & Verbose (`-v`) Output
+      description: Paste the command(s) you ran and the resulting verbose output (feel free to include additional `--isa` or `--test` runs).
+      render: shell
+      placeholder: |
+        $ cross-cpu run --duration 100ms -v
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Topology / Hardware Notes (Optional)
+      description: Mention any discrepancies vs. `lscpu` / `sysctl` (e.g., hybrid P/E core counts, NUMA nodes, cache sizes, SMT threads, or explicit unknown-state fields).
+      placeholder: "e.g., P-core/E-core split matched lscpu; L3 cache size reported accurately."
+    validations:
+      required: false
