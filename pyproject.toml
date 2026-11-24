@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cross-cpu"
 version = "0.1.3"
 description = "Cross-platform CPU stress-testing and Silent Data Corruption (SDC) validation suite"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -31,6 +32,12 @@ classifiers = [
   "Topic :: System :: Hardware",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/abdullahbagyapan/cross-cpu"
+Repository = "https://github.com/abdullahbagyapan/cross-cpu"
+Issues = "https://github.com/abdullahbagyapan/cross-cpu/issues"
+"Hardware Matrix" = "https://github.com/abdullahbagyapan/cross-cpu/discussions/2"
 
 [project.scripts]
 cross-cpu = "cross_cpu.cli:main"

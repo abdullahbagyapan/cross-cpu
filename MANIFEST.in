@@ -14,4 +14,3 @@ recursive-include completions *
 recursive-include docs *
 recursive-include tests *.py
 
-global-exclude __pycache__ *.py[cod] *.o *.so *.dylib .DS_Store
